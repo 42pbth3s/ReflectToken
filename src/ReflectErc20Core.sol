@@ -8,9 +8,11 @@ import {IERC20} from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import {IERC20Metadata} from "openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {IERC20Errors} from "openzeppelin-contracts/contracts/interfaces/draft-IERC6093.sol";
 
-uint256         constant            TIRE_THRESHOLD_BASE = 1_000_000;
 
 abstract contract ReflectErc20Core is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors {
+    uint256                             constant                TIRE_THRESHOLD_BASE = 1_000_000;
+
+
     uint24                              public                  ActiveMintIndex;
     uint8                               internal                _lastShadowIndexedTireInvert;
     uint16                              internal                _lastShadowIndexedChunkInvert;
@@ -24,7 +26,6 @@ abstract contract ReflectErc20Core is Ownable2Step, IERC20, IERC20Metadata, IERC
 
     address                             public                  TaxAuthoriy1;
     address                             public                  TaxAuthoriy2;
-    //uint256                             internal                _totalSupply;
     bytes32                             internal                _nextAirdropRoot;
     uint256                             internal                _nextAirdrop;
     uint24[FEE_TIRES]                   internal                _tireThresholds;
@@ -39,10 +40,11 @@ abstract contract ReflectErc20Core is Ownable2Step, IERC20, IERC20Metadata, IERC
     mapping (bytes32 => bool)           public                  ClaimedAirdrop;
     mapping (bytes32 => bool)           public                  RewardRoots;
     mapping (bytes32 => bool)           public                  ClaimedReward;
-
-
+    
     //mapping(address account => uint256) internal                _balances;
     mapping(address account => mapping(address spender => uint256)) internal _allowances;
+
+
 
 
 

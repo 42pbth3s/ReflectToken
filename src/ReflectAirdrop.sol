@@ -4,7 +4,7 @@ pragma solidity ^0.8.19;
 import {MerkleProof} from "openzeppelin-contracts/contracts/utils/cryptography/MerkleProof.sol";
 
 import "./ReflectDataModel.sol";
-import {ReflectTireIndex} from "./ReflectErc20Storage.sol";
+import {ReflectTireIndex} from "./ReflectTireIndex.sol";
 
 abstract contract ReflectAirdrop is ReflectTireIndex {
     
@@ -13,7 +13,7 @@ abstract contract ReflectAirdrop is ReflectTireIndex {
     }
 
 
-    function PrepareAirdrop(bytes32 root, uint256 totalAmount, uint2556 gasLimit) public onlyOwner {
+    function PrepareAirdrop(bytes32 root, uint256 totalAmount, uint256 gasLimit) public onlyOwner {
         require(root != bytes32(type(uint256).max), "Invalid root has been supplied");
         require(_nextAirdropRoot == bytes32(type(uint256).max), "Airdrop already launched");
 
@@ -22,39 +22,39 @@ abstract contract ReflectAirdrop is ReflectTireIndex {
 
         uint256 activeMintIndex = ActiveMintIndex;
         uint256 nextTotalSupply = MintIndexes[activeMintIndex].totalSupply;
-        uint256 availableBalance = balanceOf(AvailableMintAddress());
+        uint256 availableBalance = _accounts[AvailableMintAddress()].balanceBase;
         
         if (availableBalance < totalAmount) {
             nextTotalSupply += totalAmount - availableBalance;
         }
 
-        MintIndex memory newIndex;
+        MintIndex storage newIndex = MintIndexes[activeMintIndex + 1];
 
         newIndex.totalSupply = nextTotalSupply;
 
         for (uint256 i = 0; i < FEE_TIRES; i++) {
-            newIndex.tires[i].length = 0;
+            (newIndex.tires[i].regularLength, newIndex.tires[i].highLength, newIndex.tires[i].chunksCount) = 
+                (0, 0, 0);
         }
 
-        MintIndexes[activeMintIndex + 1] = newIndex;
         _lastShadowIndexedTireInvert = type(uint8).max; // not 0; gas saving
         _lastShadowIndexedChunkInvert = type(uint16).max; // not 0; gas saving
 
         IndexShadow(gasLimit);
     }
 
-    function IndexShadow(uint2556 gasLimit) public onlyOwner {
+    function IndexShadow(uint256 gasLimit) public onlyOwner {
         uint8 tire = ~_lastShadowIndexedTireInvert;
-        uint8 chunkId = ~_lastShadowIndexedChunkInvert;
+        uint16 chunkId = ~_lastShadowIndexedChunkInvert;
 
         uint256 activeMintIndex = ActiveMintIndex;
         uint256 shadowMintIndex = activeMintIndex + 1;
         uint256 shadowTotalSupply = MintIndexes[shadowMintIndex].totalSupply;
 
         for (; (tire < FEE_TIRES) && (gasleft() > gasLimit); tire++) {
-            IndexTire memory tireDesc = MintIndexes[activeMintIndex].tires[tire];
+            uint32 tireChunksCount = MintIndexes[activeMintIndex].tires[tire].chunksCount;
 
-            for (; (chunkId < tireDesc.chunksCount) && (gasleft() > gasLimit); chunkId++) {
+            for (; (chunkId < tireChunksCount) && (gasleft() > gasLimit); chunkId++) {
                 
                 IndexChunk memory chunk = MintIndexes[activeMintIndex].tires[tire].chunks[chunkId];
 
@@ -68,13 +68,17 @@ abstract contract ReflectAirdrop is ReflectTireIndex {
                     if (tireFound) {
                         uint256 chunkIndex = _appendAccountToMintIndex(MintIndexes[shadowMintIndex], newTire, chunk.list[i]);
 
-                        (_accounts[chunk.list[i]].shadowIndexId, _accounts[chunk.list[i]].shadowIndexTire, _accounts[chunk.list[i]].shadowIndexChunk) =
-                            (shadowMintIndex, newTire, uint16(chunkIndex));
+                        (
+                            _accounts[chunk.list[i]].shadowIndexId, 
+                            _accounts[chunk.list[i]].shadowIndexTireInvert, 
+                            _accounts[chunk.list[i]].shadowIndexChunkInvert
+                        ) =
+                            (uint24(shadowMintIndex), ~newTire, ~uint16(chunkIndex));
                     }
                 }
             }
 
-            if (chunkId == tireDesc.chunksCount) {
+            if (chunkId == tireChunksCount) {
                 chunkId = 0;
             }
         }
@@ -89,24 +93,26 @@ abstract contract ReflectAirdrop is ReflectTireIndex {
         
         require(nextAirdropRoot != bytes32(type(uint256).max), "Airdrop must be prepared");
         require((~_lastShadowIndexedTireInvert) == FEE_TIRES, "You must initilize index first");
-        require(nextAirdropRoot != bytes32(1), "This airdrop for targted users. You cannot launch public one!");
+        require(nextAirdropRoot != bytes32(uint256(1)), "This airdrop for targted users. You cannot launch public one!");
 
         
         //Activating new index
-        uint256 newMint = ++ActiveMintIndex;        
+        uint24 newMint = ++ActiveMintIndex;        
         uint256 currentRewardCycle = CurrentRewardCycle;
-
-        //Updating reward stat
-        for (uint256 i = 0; i < FEE_TIRES; i++) {
-            IndexTire memory tireDesc = MintIndexes[newMint].tires[i];
-
-            (RewardCycles[currentRewardCycle].rewardRecievers[i], RewardCycles[currentRewardCycle].highRewardRecievers[i]) = 
-                (tireDesc.regularLength, tireDesc.highLength);
-        }
-
+        RewardCycles[currentRewardCycle].mintIndex = newMint;
+       
         //Activating airdrop
         uint256 nextAirdrop = _nextAirdrop;
-        //TODO: check out available and suck it out
+        uint256 availableBalance = _accounts[AvailableMintAddress()].balanceBase;
+
+        if (availableBalance > 0) {
+            if (availableBalance > nextAirdrop) {
+                availableBalance -= nextAirdrop;
+                _accounts[AvailableMintAddress()].balanceBase = availableBalance;
+            } else {
+                _accounts[AvailableMintAddress()].balanceBase = 0;
+            }
+        }
         _accounts[LockedMintAddress()].balanceBase += nextAirdrop;
         AirdropWaveRoots[nextAirdropRoot] = nextAirdrop;
 
@@ -126,6 +132,40 @@ abstract contract ReflectAirdrop is ReflectTireIndex {
     }
 
 
+    function MintTo(address wallet) public onlyOwner {
+        bytes32 nextAirdropRoot = _nextAirdropRoot;
+        
+        require(nextAirdropRoot != bytes32(type(uint256).max), "Airdrop must be prepared");
+        require((~_lastShadowIndexedTireInvert) == FEE_TIRES, "You must initilize index first");
+        require(nextAirdropRoot == bytes32(uint256(1)), "This is a public airdrop. You cannot do targeted one!");
+
+        _nextAirdropRoot = bytes32(type(uint256).max);
+        
+        //Activating new index
+        uint24 newMint = ++ActiveMintIndex;        
+        uint256 currentRewardCycle = CurrentRewardCycle;
+        RewardCycles[currentRewardCycle].mintIndex = newMint;
+
+        //Activating airdrop
+        uint256 nextAirdrop = _nextAirdrop;
+        uint256 availableBalance = _accounts[AvailableMintAddress()].balanceBase;
+
+        if (availableBalance > 0) {
+            if (availableBalance > nextAirdrop) {
+                availableBalance -= nextAirdrop;
+                _accounts[AvailableMintAddress()].balanceBase = availableBalance;
+            } else {
+                _accounts[AvailableMintAddress()].balanceBase = 0;
+            }
+        }
+        _accounts[LockedMintAddress()].balanceBase += nextAirdrop;
+
+        _mint(wallet, nextAirdrop);
+        
+        _updateUserIndex(wallet, balanceOfWithUpdate(wallet));
+    }
+
+
     function Airdrop(bytes32 root, bytes32[] calldata proof, uint256 amount) public {
         require(AirdropWaveRoots[root] >= amount, "Unrecognized airdrop or Airdrop has been stoped");
 
@@ -138,40 +178,8 @@ abstract contract ReflectAirdrop is ReflectTireIndex {
         _mint(msg.sender, amount);
 
 
-        AirdropWaveRoots[nextAirdropRoot] -= amount;
+        AirdropWaveRoots[root] -= amount;
 
-        _updateUserIndex(msg.sender, balanceOfWithUpdate(wallet));
-    }
-
-
-    function MintTo(address wallet) public onlyOwner {
-        bytes32 nextAirdropRoot = _nextAirdropRoot;
-        
-        require(nextAirdropRoot != bytes32(type(uint256).max), "Airdrop must be prepared");
-        require((~_lastShadowIndexedTireInvert) == FEE_TIRES, "You must initilize index first");
-        require(nextAirdropRoot == bytes32(1), "This is a public airdrop. You cannot do targeted one!");
-
-        _nextAirdropRoot = bytes32(type(uint256).max);
-        
-        //Activating new index
-        uint256 newMint = ++ActiveMintIndex;        
-        uint256 currentRewardCycle = CurrentRewardCycle;
-
-        //Updating reward stat
-        for (uint256 i = 0; i < FEE_TIRES; i++) {
-            IndexTire memory tireDesc = MintIndexes[newMint].tires[i];
-
-            (RewardCycles[currentRewardCycle].rewardRecievers[i], RewardCycles[currentRewardCycle].highRewardRecievers[i]) = 
-                (tireDesc.regularLength, tireDesc.highLength);
-        }
-
-        //Activating airdrop
-        uint256 nextAirdrop = _nextAirdrop;
-        //TODO: check out available and suck it out
-        _accounts[LockedMintAddress()].balanceBase += nextAirdrop;
-
-        _mint(wallet, nextAirdrop);
-        
-        _updateUserIndex(wallet, balanceOfWithUpdate(wallet));
+        _updateUserIndex(msg.sender, balanceOfWithUpdate(msg.sender));
     }
 }

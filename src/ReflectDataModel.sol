@@ -38,7 +38,4 @@ struct MintIndex {
 struct RewardCycle {
     uint96 taxed;
     uint24 mintIndex;
-    uint32[FEE_TIRES] rewardRecievers;
-    uint32[FEE_TIRES] highRewardRecievers;
-
 }
