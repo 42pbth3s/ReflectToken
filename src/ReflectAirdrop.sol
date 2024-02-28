@@ -19,7 +19,7 @@ abstract contract ReflectAirdrop is ReflectTireIndex {
 
     function PrepareAirdrop(bytes32 root, uint256 totalAmount, uint256 gasLimit) public onlyOwner {
         require(root != bytes32(type(uint256).max), "Invalid root has been supplied");
-        require(_nextAirdropRoot == bytes32(type(uint256).max), "Airdrop already launched");
+        require(_nextAirdropRoot == bytes32(type(uint256).max), "Airdrop already in preparation");
         require(!RegistredAirdrop[root], "This airdrop has already been registred");
         require(totalAmount > 0, "Airdrop shall be positive");
 
@@ -46,8 +46,8 @@ abstract contract ReflectAirdrop is ReflectTireIndex {
                 (0, 0, 0);
         }
 
-        _lastShadowIndexedTireInvert = type(uint8).max; // not 0; gas saving
-        _lastShadowIndexedChunkInvert = type(uint16).max; // not 0; gas saving
+        _lastShadowIndexedTireInvert = type(uint8).max; // not of 0; gas saving
+        _lastShadowIndexedChunkInvert = type(uint16).max; // not of 0; gas saving
 
         IndexShadow(gasLimit);
     }
@@ -130,8 +130,10 @@ abstract contract ReflectAirdrop is ReflectTireIndex {
         _nextAirdropRoot = bytes32(type(uint256).max);
     }
 
-    function StopAirdrop(bytes32 root) public onlyOwner {
+    function StopAirdrop(bytes32 root) public onlyOwner {        
         uint256 remaining = AirdropWaveRoots[root];
+
+        require(remaining > 0, "Airdrop never existed or has been fully claimed");
 
         AirdropWaveRoots[root] = 0;
 
