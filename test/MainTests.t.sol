@@ -765,6 +765,28 @@ contract CounterTest is Test {
 
         (taxed, ) = TokenContract.RewardCycles(TokenContract.CurrentRewardCycle());
         assertEq(  5_0 * 1e18, taxed, "rew cycle taxed 2");
+
+        
+        console.log("Tax on from");
+        
+        address wasteWallet = _allocateBurner();
+        vm.startPrank(taxable);
+        TokenContract.transfer(wasteWallet, 100_0 * 1e18);
+        vm.stopPrank();
+
+        
+        _printWalletBalance(taxable);
+        _printWalletBalance(wasteWallet);
+        _printWalletBalance(TaxAuth1);
+        _printWalletBalance(TaxAuth2);
+
+        assertEq( 90_0 * 1e18, TokenContract.balanceOf(taxable), "taxable balance 3");
+        assertEq( 95_0 * 1e18, TokenContract.balanceOf(wasteWallet), "waste balance");
+        assertEq(  7_5 * 1e18, TokenContract.balanceOf(TaxAuth1), "tax1 balance 3");
+        assertEq(  7_5 * 1e18, TokenContract.balanceOf(TaxAuth2), "tax2 balance 3");
+        
+        (taxed, ) = TokenContract.RewardCycles(TokenContract.CurrentRewardCycle());
+        assertEq(  7_5 * 1e18, taxed, "rew cycle taxed 3");
     }
 
     function testTaxCollectionOn0Tax() public {
@@ -1740,10 +1762,191 @@ contract CounterTest is Test {
 
 
 
-    function testTaxRewardDistro() public {
+    struct _rewardDistroState {
+        address[]  users;
+        uint256[]  sizes;
+        uint8[]    tires;
+        uint256    totalAirdrop;
+        bytes32    root;
+        address    taxedWallet;
 
+        MerkelTree tree;
     }
-    //TODO: shadow index tests
-    //TODO: Locked & available tests
+
+
+    function testTaxRewardDistro() public {
+        _rewardDistroState memory lState;
+
+        lState.users = new address[](5);
+        lState.sizes = new uint256[](lState.users.length);
+        lState.tires = new uint8[](lState.users.length - 1);
+
+        lState.totalAirdrop = 10_000_000 * 1e18;
+
+        for (uint256 i = 0; i < lState.users.length; i++) {
+            lState.users[i] = _allocateBurner();
+        }
+
+        //           100_0000
+        lState.sizes[0] =    (2_0000 * lState.totalAirdrop) / 100_0000;
+        lState.sizes[1] =    (1_9000 * lState.totalAirdrop) / 100_0000;
+        lState.tires[0] = 0;
+        lState.tires[1] = 0;
+
+        lState.sizes[2] =    (  9000 * lState.totalAirdrop) / 100_0000;
+        lState.sizes[3] =    (  8000 * lState.totalAirdrop) / 100_0000;
+        lState.tires[2] = 1;
+        lState.tires[3] = 1;
+
+
+        lState.sizes[4] = lState.totalAirdrop;
+
+        for (uint256 i = 0; i < (lState.sizes.length - 1); i++) {
+            lState.sizes[4] -= lState.sizes[i];
+        }
+
+        lState.tree = _generateAirdropMerkleTree(lState.users, lState.sizes);
+        lState.root = lState.tree.flatTree[lState.tree.flatTree.length - 1];
+        lState.taxedWallet = _allocateBurner();
+
+
+        vm.startPrank(Owner);
+        TokenContract.UpdateWhitelisting(lState.taxedWallet, true);
+        TokenContract.PrepareAirdrop(lState.root, lState.totalAirdrop, 20_000);
+        TokenContract.IndexShadow(20_000);
+        TokenContract.LaunchAirdrop();
+        vm.stopPrank();
+
+
+        for (uint256 i = 0; i < (lState.users.length - 1); i++) {
+            console.log("User: %d", i);
+
+            bytes32[] memory proof = _extractMerkleProof(lState.tree, i);
+
+            vm.startPrank(lState.users[i]);
+            TokenContract.Airdrop(lState.root, proof, lState.sizes[i]);
+            vm.stopPrank();
+
+            _printWalletBalance(lState.users[i]);
+            console.log("++++++++++++++++++++++++ NEXT USER ++++++++++++++++++++++++++");
+        }
+
+        console.log();
+        console.log("==================================================================");
+        console.log("                           TRANSFERS");
+        console.log();
+
+        for (uint256 i = 0; i < (lState.users.length - 1); i++) {
+            vm.startPrank(lState.users[i]);
+            TokenContract.transfer(lState.taxedWallet, 100 * 1e18);
+            vm.stopPrank();
+
+            _printWalletBalance(lState.users[i]);
+        }
+
+        _printWalletBalance(TaxAuth1);
+
+        vm.startPrank(Owner);
+        TokenContract.LaunchNewRewardCycle();
+        vm.stopPrank();
+
+        console.log();
+        console.log("==================================================================");
+        console.log("                           REWARDED BALANCES");
+        console.log();
+
+        for (uint256 i = 0; i < (lState.users.length - 1); i++) {
+            _printWalletBalance(lState.users[i]);
+        }
+    }
+
+    
+    function testAirdropLockedAvailable() public {
+        address[] memory users = new address[](10);
+        uint256[] memory sizes = new uint256[](users.length);
+        uint256 totalAirdropSize = 0;
+
+        for (uint256 i = 0; i < users.length; i++) {
+            users[i] = _allocateBurner();
+            sizes[i] = (i + 1) * 1e18;
+            totalAirdropSize += (i + 1) * 1e18;
+        }
+
+        MerkelTree memory tree = _generateAirdropMerkleTree(users, sizes);
+        bytes32 root = tree.flatTree[tree.flatTree.length - 1];
+
+        console.log("Launching airdrop");
+
+        vm.startPrank(Owner);
+        TokenContract.PrepareAirdrop(root, totalAirdropSize, 20_000);
+        TokenContract.IndexShadow(20_000);
+        TokenContract.LaunchAirdrop();
+        vm.stopPrank();
+
+
+        uint256 totalSupply1 = TokenContract.totalSupply();
+        assertEq(totalAirdropSize, totalSupply1, "total supply1");
+        console.log("Total supply: %d", totalSupply1);
+
+        _printWalletBalance(TokenContract.LockedMintAddress());
+        _printWalletBalance(TokenContract.AvailableMintAddress());
+
+        assertEq(totalAirdropSize, TokenContract.balanceOf(TokenContract.LockedMintAddress()), "locked 1");
+        assertEq(0, TokenContract.balanceOf(TokenContract.AvailableMintAddress()), "available 1");
+
+
+        console.log("Claiming");
+        for (uint256 i = 2; i < users.length; i++) {
+            bytes32[] memory proof = _extractMerkleProof(tree, i);
+
+            vm.startPrank(users[i]);
+            TokenContract.Airdrop(root, proof, sizes[i]);
+            vm.stopPrank();
+        }
+
+        _printWalletBalance(TokenContract.LockedMintAddress());
+        _printWalletBalance(TokenContract.AvailableMintAddress());
+
+        assertEq(sizes[0] + sizes[1], TokenContract.balanceOf(TokenContract.LockedMintAddress()), "locked 2");
+        assertEq(0, TokenContract.balanceOf(TokenContract.AvailableMintAddress()), "available 2");
+
+        
+        console.log("Stopping");
+        vm.startPrank(Owner);
+        TokenContract.StopAirdrop(root);
+        vm.stopPrank();
+
+        _printWalletBalance(TokenContract.LockedMintAddress());
+        _printWalletBalance(TokenContract.AvailableMintAddress());
+
+        assertEq(0, TokenContract.balanceOf(TokenContract.LockedMintAddress()), "locked 3");
+        assertEq(sizes[0] + sizes[1], TokenContract.balanceOf(TokenContract.AvailableMintAddress()), "available 3");
+
+
+        console.log("NewAirdrop");
+
+        vm.startPrank(Owner);
+        TokenContract.PrepareAirdrop(bytes32(uint256(0x1234567890)), sizes[0] + sizes[1] + 1, 20_000);
+        TokenContract.IndexShadow(20_000);
+        TokenContract.LaunchAirdrop();
+        vm.stopPrank();
+
+        
+        uint256 totalSupply2 = TokenContract.totalSupply();
+        console.log("Total supply: %d", totalSupply2);
+        assertEq(totalSupply1 + 1, totalSupply2, "total supply 2");
+
+        _printWalletBalance(TokenContract.LockedMintAddress());
+        _printWalletBalance(TokenContract.AvailableMintAddress());
+
+        assertEq(sizes[0] + sizes[1] + 1, TokenContract.balanceOf(TokenContract.LockedMintAddress()), "locked 4");
+        assertEq(0, TokenContract.balanceOf(TokenContract.AvailableMintAddress()), "available 4");
+    }
+
+
+    //TODO: High reward & indexes
+    //TODO: Tests with multiple shadow index iteraions
+    //TODO: double accounting
+    //TODO: access tests
 
 }
