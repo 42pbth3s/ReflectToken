@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: NONE
 pragma solidity ^0.8.19;
 
-import {MerkleProof} from "openzeppelin-contracts/contracts/utils/cryptography/MerkleProof.sol";
+import {MerkleProof} from "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
 
 import "./ReflectDataModel.sol";
 import {ReflectTireIndex} from "./ReflectTireIndex.sol";
 
 abstract contract ReflectAirdrop is ReflectTireIndex {
+
+    constructor () {
+        _nextAirdropRoot = bytes32(type(uint256).max);
+    }
     
     function _shadowMintIndexEnabled() internal override view returns (bool) {
         return _nextAirdropRoot != bytes32(type(uint256).max);

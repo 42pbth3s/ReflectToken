@@ -4,7 +4,6 @@ pragma solidity ^0.8.19;
 import "./ReflectDataModel.sol";
 import {ReflectErc20Core} from "./ReflectErc20Core.sol";
 
-
 abstract contract ReflectTireIndex is ReflectErc20Core {
     
     function _getIndexTireByBalance(uint256 balance, uint256 totalSupply) internal view returns (uint8, bool) {        
@@ -86,15 +85,12 @@ abstract contract ReflectTireIndex is ReflectErc20Core {
         require(false, "Nothing has been deleted");
     }
     struct _userIndexTireState {
+        uint256 oldTierId;
+        uint256 oldChunkId;
         uint8 newTire;
-        bool tireFound;
-        uint256 chunkId;
     }
 
     struct _userIndexState {
-        uint256 oldTierId;
-        uint256 oldChunkId;
-
         _userIndexTireState mainIndex;
         _userIndexTireState shadowIndex;
     }
@@ -102,30 +98,33 @@ abstract contract ReflectTireIndex is ReflectErc20Core {
     function _updateUserIndex(address wallet, uint256 balance) internal {
         MintIndex storage mIndex = MintIndexes[ActiveMintIndex];
         AccountState storage account = _accounts[wallet];
-        uint256 oldTierId;
-        uint256 oldChunkId;
+
+        _userIndexState memory lState;
 
         unchecked {
-            oldTierId = ~uint256(account.mintIndexTireInvert);
-            oldChunkId = ~uint256(account.mintIndexChunkInvert);
+            lState.mainIndex.oldTierId = uint256(~account.mintIndexTireInvert);
+            lState.mainIndex.oldChunkId = uint256(~account.mintIndexChunkInvert);
         }
         
         {
-            (uint8 newTire, bool tireFound) = _getIndexTireByBalance(balance, mIndex.totalSupply);
+            bool tireFound;
+            (lState.mainIndex.newTire, tireFound) = _getIndexTireByBalance(balance, mIndex.totalSupply);
 
             if (tireFound) {
-                if (oldTierId != type(uint256).max) {
-                    _dropAccountFromMintIndex(mIndex, wallet, uint8(oldTierId), oldChunkId);
+                if (lState.mainIndex.oldTierId != lState.mainIndex.newTire) 
+                {
+                    if (lState.mainIndex.oldTierId != type(uint8).max) {
+                        _dropAccountFromMintIndex(mIndex, wallet, uint8(lState.mainIndex.oldTierId), lState.mainIndex.oldChunkId);
+                    }
+
+                    uint256 chunkId = _appendAccountToMintIndex(mIndex, lState.mainIndex.newTire, wallet);
+
+                    
+                    (account.mintIndexTireInvert, account.mintIndexChunkInvert) = 
+                        (~lState.mainIndex.newTire, ~uint16(chunkId));
                 }
-
-                uint256 chunkId = _appendAccountToMintIndex(mIndex, newTire, wallet);
-
-                
-                (account.mintIndexTireInvert, account.mintIndexChunkInvert) = 
-                    (~newTire, ~uint16(chunkId));
-
-            } else if (oldTierId != type(uint256).max) {
-                _dropAccountFromMintIndex(mIndex, wallet, uint8(oldTierId), oldChunkId);
+            } else if (lState.mainIndex.oldTierId != type(uint8).max) {
+                _dropAccountFromMintIndex(mIndex, wallet, uint8(lState.mainIndex.oldTierId), lState.mainIndex.oldChunkId);
 
                 (account.mintIndexTireInvert, account.mintIndexChunkInvert) = (0, 0);
             }
@@ -135,7 +134,7 @@ abstract contract ReflectTireIndex is ReflectErc20Core {
 
         //Shall happen on very rare ocasions
         //if were not into index before - there is now way we will occur in shadow
-        if ((oldTierId != type(uint256).max) && _shadowMintIndexEnabled()) {
+        if ((lState.mainIndex.oldTierId != type(uint8).max) && _shadowMintIndexEnabled()) {
             //TODO: Check that we're reached stage of main index
 
             uint8 lastShadowIndexedTire = ~_lastShadowIndexedTireInvert;
@@ -143,34 +142,48 @@ abstract contract ReflectTireIndex is ReflectErc20Core {
 
             //only if was indexed into shadow again - we need to go into it
             if (
-                (oldTierId < lastShadowIndexedTire) ||
-                ((oldTierId == lastShadowIndexedTire) && (oldChunkId < lastShadowIndexedChunk))
+                (lState.mainIndex.oldTierId < lastShadowIndexedTire) ||
+                (
+                    (lState.mainIndex.oldTierId == lastShadowIndexedTire) && 
+                    (lState.mainIndex.oldChunkId < lastShadowIndexedChunk)
+                )
             ) {
-                MintIndex storage shadowMIndex = MintIndexes[ActiveMintIndex + 1];
+                uint24 shadowMintIndex = ActiveMintIndex + 1;
+                MintIndex storage shadowMIndex = MintIndexes[shadowMintIndex];
                 AccountState storage accountCopy = account; //stack too deep
 
-                (uint8 newShadowTire, bool shadowTireFound) = _getIndexTireByBalance(balance, shadowMIndex.totalSupply);
+                bool shadowTireFound;
+                (lState.shadowIndex.newTire, shadowTireFound) = _getIndexTireByBalance(balance, shadowMIndex.totalSupply);
 
                 if (shadowTireFound) {
+                    if (lState.shadowIndex.oldTierId != lState.shadowIndex.newTire) 
                     {
-                        uint256 oldShadowTierId = ~uint256(accountCopy.shadowIndexTireInvert);
-                        
-                        if (oldShadowTierId != type(uint256).max) {
-                            uint256 oldShadowChunkId = ~uint256(accountCopy.shadowIndexChunkInvert);
+                        {   
+                            uint24 accountShadowMintIndex;                     
+                            (accountShadowMintIndex, lState.shadowIndex.oldTierId) = 
+                                (accountCopy.shadowIndexId, uint256(~accountCopy.shadowIndexTireInvert));
+                            
+                            if (shadowMintIndex == accountShadowMintIndex) { //make sure that we're indexed
+                                if (lState.shadowIndex.oldTierId != type(uint8).max) {                            
+                                    lState.shadowIndex.oldChunkId = uint256(~accountCopy.shadowIndexChunkInvert);
 
-                            _dropAccountFromMintIndex(shadowMIndex, wallet, uint8(oldShadowTierId), oldShadowChunkId);
+                                    _dropAccountFromMintIndex(shadowMIndex, wallet, uint8(lState.shadowIndex.oldTierId), lState.shadowIndex.oldChunkId);
+                                }
+                            }
                         }
+
+                        uint256 shadowChunkId = _appendAccountToMintIndex(shadowMIndex, lState.shadowIndex.newTire, wallet);
+
+                        
+                        (accountCopy.shadowIndexId, accountCopy.shadowIndexTireInvert, accountCopy.shadowIndexChunkInvert) = 
+                            (ActiveMintIndex + 1, ~lState.shadowIndex.newTire, ~uint16(shadowChunkId));
                     }
-
-                    uint256 shadowChunkId = _appendAccountToMintIndex(shadowMIndex, newShadowTire, wallet);
-
-                    
-                    (accountCopy.shadowIndexId, accountCopy.shadowIndexTireInvert, accountCopy.shadowIndexChunkInvert) = 
-                        (ActiveMintIndex + 1, ~newShadowTire, ~uint16(shadowChunkId));
-
-                } else if (accountCopy.shadowIndexTireInvert != 0) {
-                    uint256 oldShadowTierId = ~uint256(accountCopy.shadowIndexTireInvert);
-                    uint256 oldShadowChunkId = ~uint256(accountCopy.shadowIndexChunkInvert);
+                } else if (
+                        (accountCopy.shadowIndexTireInvert != 0) &&
+                        (shadowMintIndex == accountCopy.shadowIndexId) //make sure that we're indexed
+                    ) { 
+                    uint256 oldShadowTierId = uint256(~accountCopy.shadowIndexTireInvert);
+                    uint256 oldShadowChunkId = uint256(~accountCopy.shadowIndexChunkInvert);
 
                     _dropAccountFromMintIndex(shadowMIndex, wallet, uint8(oldShadowTierId), oldShadowChunkId);
                     

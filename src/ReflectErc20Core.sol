@@ -3,10 +3,10 @@ pragma solidity ^0.8.19;
 
 
 import "./ReflectDataModel.sol";
-import {Ownable2Step} from "openzeppelin-contracts/contracts/access/Ownable2Step.sol";
-import {IERC20} from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
-import {IERC20Metadata} from "openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-import {IERC20Errors} from "openzeppelin-contracts/contracts/interfaces/draft-IERC6093.sol";
+import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import {IERC20Errors} from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
 
 
 abstract contract ReflectErc20Core is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors {
@@ -22,7 +22,6 @@ abstract contract ReflectErc20Core is Ownable2Step, IERC20, IERC20Metadata, IERC
 
     uint16                              public                  Tax;
     uint16                              public                  TaxAuth1Share;
-    uint16                              public                  TaxRewardShare;
 
     address                             public                  TaxAuthoriy1;
     address                             public                  TaxAuthoriy2;
@@ -87,7 +86,19 @@ abstract contract ReflectErc20Core is Ownable2Step, IERC20, IERC20Metadata, IERC
     function LastShadowIndexedChunk() public view returns(uint16) {
         return ~_lastShadowIndexedChunkInvert;
     }
-    
+
+    function GetTireData(uint256 mint, uint256 tire) public view returns(uint32, uint32, uint32) {
+        IndexTire storage tireRecord = MintIndexes[mint].tires[tire];
+
+        return (tireRecord.regularLength, tireRecord.highLength, tireRecord.chunksCount);
+    }
+
+    function GetTireChunk(uint256 mint, uint256 tire, uint256 chunk) public view returns(uint8, address[CHUNK_SIZE] memory) {
+        IndexChunk storage chunkRec = MintIndexes[mint].tires[tire].chunks[chunk];
+
+        return (chunkRec.length, chunkRec.list);
+    }
+
     
     function approve(address spender, uint256 value) public virtual returns (bool) {
         _approve(msg.sender, spender, value);

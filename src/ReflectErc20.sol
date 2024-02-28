@@ -1,33 +1,37 @@
 // SPDX-License-Identifier: NONE
 pragma solidity ^0.8.19;
 
-import {Ownable} from "openzeppelin-contracts/contracts/access/Ownable.sol";
-import {IERC20Errors} from "openzeppelin-contracts/contracts/interfaces/draft-IERC6093.sol";
-import {MerkleProof} from "openzeppelin-contracts/contracts/utils/cryptography/MerkleProof.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {IERC20Errors} from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
+import {MerkleProof} from "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
 
 import "./ReflectDataModel.sol";
 import {ReflectTireIndex} from "./ReflectTireIndex.sol";
 import {ReflectAirdrop} from "./ReflectAirdrop.sol";
 
 contract Reflect is ReflectTireIndex, ReflectAirdrop {
-    constructor (uint16 tax, uint16 share1, uint16 rewardShare, address taxAuth1, address taxAuth2)
+    constructor (uint16 tax, uint16 share1, address taxAuth1, address taxAuth2)
         Ownable(msg.sender) {
         
         Tax = tax;
         TaxAuth1Share = share1;
-        TaxRewardShare = rewardShare;
         TaxAuthoriy1 = taxAuth1;
         TaxAuthoriy2 = taxAuth2;
 
-        (_tireThresholds[0], _tireThresholds[1], _tireThresholds[2], _tireThresholds[3], 
-         _tireThresholds[4], _tireThresholds[5], _tireThresholds[6], _tireThresholds[7]) =
-            (1_0000, 7000, 3000, 900, 
-            600, 300, 90, 50);
+           
+        (_tireThresholds[0], _tireThresholds[1], _tireThresholds[2], _tireThresholds[3])=
+            (1_0000, 7000, 3000, 900);
 
-        (_tirePortion[0], _tirePortion[0], _tirePortion[0], _tirePortion[0], 
-         _tirePortion[0], _tirePortion[0], _tirePortion[0], _tirePortion[0]) = 
-            (30_00, 23_00, 15_00, 11_00,
-             8_00, 6_00, 4_50, 2_50);        
+        (_tireThresholds[4], _tireThresholds[5], _tireThresholds[6], _tireThresholds[7]) =
+            (600, 300, 90, 50);
+        
+        
+        (_tirePortion[0], _tirePortion[1], _tirePortion[2], _tirePortion[3]) =
+            (30_00, 23_00, 15_00, 11_00);
+
+        (_tirePortion[4], _tirePortion[5], _tirePortion[6], _tirePortion[7]) = 
+            (8_00, 6_00, 4_50, 2_50);
+        
     }
 
     /********************************** GENERIC VIEW FUNCTIONs **********************************/
@@ -41,16 +45,22 @@ contract Reflect is ReflectTireIndex, ReflectAirdrop {
     /********************************** CORE LOGIC **********************************/
 
     function balanceOf(address account) public override view returns (uint256) {
-        (uint256 balance, ) = _balanceWithRewards(account);
+        (uint256 balance, ,) = _balanceWithRewards(account);
         return balance;
     }
 
     function balanceOfWithUpdate(address account) public override returns (uint256) {
-        (uint256 balance, bool requireUpdate) = _balanceWithRewards(account);
+        (uint256 balance, bool requireUpdate, uint256 rewarded) = _balanceWithRewards(account);
 
         if (requireUpdate) {
             (_accounts[account].balanceBase, _accounts[account].lastRewardId) = 
                 (balance, CurrentRewardCycle);
+
+            address taxAuth1 = TaxAuthoriy1;
+
+            _accounts[taxAuth1].balanceBase -= rewarded;
+            
+            emit Transfer(taxAuth1, account, rewarded);
         }
 
         return balance;
@@ -70,10 +80,20 @@ contract Reflect is ReflectTireIndex, ReflectAirdrop {
 
     //++++++++++++++++++++++++++++++++ PRIVATE +++++++++++++++++++++
 
+    struct _balanceState {
+        uint256 resultBalance;
+        bool needUpdate;
+        uint256 rewarded;
+        uint256 rewardCycle;
+        bool highReward;
+    }
+
     //This funcation assumes that balance hasn't been changed since last transfer happen
     // Each transfer must call balanceOfWithUpdate to update the state
-    function _balanceWithRewards(address wallet) private view returns (uint256, bool) {
-        (uint256 resultBalance, uint256 rewardCycle, bool highReward) = 
+    function _balanceWithRewards(address wallet) private view returns (uint256, bool, uint256) {
+        _balanceState memory lState;
+
+        (lState.resultBalance, lState.rewardCycle, lState.highReward) = 
             (_accounts[wallet].balanceBase, _accounts[wallet].lastRewardId, _accounts[wallet].isHighReward);
 
         if (
@@ -81,19 +101,20 @@ contract Reflect is ReflectTireIndex, ReflectAirdrop {
                 (wallet == AvailableMintAddress())
         ) {
             // special accounts doesn't take participation in rewards
-            return (resultBalance, false);
+            return (lState.resultBalance, false, 0);
         }
 
-        bool needUpdate = false;
+        lState.needUpdate = false;
+        lState.rewarded = 0;
 
         uint32 maxRewardId = CurrentRewardCycle;
-        for (; rewardCycle < maxRewardId; rewardCycle++) {
-            needUpdate = true;
+        for (; lState.rewardCycle < maxRewardId; lState.rewardCycle++) {
+            lState.needUpdate = true;
 
-            (uint96 taxed, uint24 mintIndex) = (RewardCycles[rewardCycle].taxed, RewardCycles[rewardCycle].mintIndex);
+            (uint96 taxed, uint24 mintIndex) = (RewardCycles[lState.rewardCycle].taxed, RewardCycles[lState.rewardCycle].mintIndex);
 
             uint256 historicTotalSupply = MintIndexes[mintIndex].totalSupply;
-            (uint8 tire, bool tireFound) = _getIndexTireByBalance(resultBalance, historicTotalSupply);
+            (uint8 tire, bool tireFound) = _getIndexTireByBalance(lState.resultBalance, historicTotalSupply);
 
             if (tireFound) {
                 uint256 tirePool = _tirePortion[tire] * taxed / 10_000;
@@ -107,7 +128,7 @@ contract Reflect is ReflectTireIndex, ReflectAirdrop {
                     uint256 nominator = 10_000;
                     uint256 denominator = 10_000 * regular + 10_100 * high;
 
-                    if (highReward) {
+                    if (lState.highReward) {
                         nominator *= 10_100;
                     } else {
                         nominator *= 10_000;
@@ -117,18 +138,18 @@ contract Reflect is ReflectTireIndex, ReflectAirdrop {
 
                     rewardShare = tirePool * shareRatio / 10_000;
 
-                    resultBalance += rewardShare;
+                    lState.rewarded += rewardShare;
                 }
             }
         }
 
-        return (resultBalance, needUpdate);
+        return (lState.resultBalance + lState.rewarded, lState.needUpdate, lState.rewarded);
     }
 
     function _externalTransferCore(address from, address to, uint256 value) private returns (bool)  {
         uint256 taxRate = 0;
 
-        if (Taxable[to])
+        if (Taxable[to] || Taxable[from])
             taxRate = Tax;
 
         uint256 taxValue = value * taxRate / 10_000;
@@ -138,14 +159,14 @@ contract Reflect is ReflectTireIndex, ReflectAirdrop {
         if (taxValue > 0) {
             uint256 auth1Amount = taxValue * TaxAuth1Share / 10_000;
             taxValue -= auth1Amount;
+            
+            if (auth1Amount > 0)
+                _transferCore(from, TaxAuthoriy1, auth1Amount);
 
-            uint256 rewardPool = auth1Amount *  TaxRewardShare / 10_000;
-            auth1Amount -= rewardPool;
-                        
-            _transferCore(from, TaxAuthoriy1, auth1Amount);
-            _transferCore(from, TaxAuthoriy2, taxValue);
+            if (taxValue > 0)
+                _transferCore(from, TaxAuthoriy2, taxValue);
 
-            RewardCycles[CurrentRewardCycle].taxed += uint96(rewardPool);
+            RewardCycles[CurrentRewardCycle].taxed += uint96(auth1Amount);
         }
 
         _indexableTransferFrom(from, to, value);
@@ -206,10 +227,9 @@ contract Reflect is ReflectTireIndex, ReflectAirdrop {
     }
 
 
-    function SetTaxRatio(uint16 tax, uint16 share1, uint16 rewardShare) public onlyOwner {
+    function SetTaxRatio(uint16 tax, uint16 share1) public onlyOwner {
         Tax = tax;
         TaxAuth1Share = share1;
-        TaxRewardShare = rewardShare;
     }
 
      function UpdateTaxAuthorities(address taxAuth1, address taxAuth2) public onlyOwner {
