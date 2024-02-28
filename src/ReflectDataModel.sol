@@ -4,18 +4,19 @@ pragma solidity ^0.8.19;
 uint256 constant CHUNK_SIZE = 20;
 uint256 constant FEE_TIRES = 8;
 
+//This index pointers only mainted to give ability drop records from main index below
+struct AccountTireIndex {
+    uint24 indexId;
+    uint8 tireIdInvert; //default is 0 -> uintX.max
+    uint16 chunkIdInvert; 
+}
+
 struct AccountState {
     uint256 balanceBase;
     uint32 lastRewardId;
     bool isHighReward;
 
-    uint8 mintIndexTireInvert; //default is 0 -> uintX.max
-    uint16 mintIndexChunkInvert;    
-
-    uint24 shadowIndexId;
-    uint8 shadowIndexTireInvert;
-    uint16 shadowIndexChunkInvert;
-
+    AccountTireIndex[2] tirePoitnters;
 }
 
 struct IndexChunk {

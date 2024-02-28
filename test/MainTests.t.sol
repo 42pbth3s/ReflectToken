@@ -347,19 +347,20 @@ contract CounterTest is Test {
         {
             console.log(" Account pointers");
 
-            uint8 mintIndexTire = ~accountInfo.mintIndexTireInvert;
-            uint16 mintIndexChunk = ~accountInfo.mintIndexChunkInvert;
+            uint256 currentMintIndex = TokenContract.ActiveMintIndex();
+
+            uint8 mintIndexTire = ~accountInfo.tirePoitnters[currentMintIndex % 2].tireIdInvert;
+            uint16 mintIndexChunk = ~accountInfo.tirePoitnters[currentMintIndex % 2].chunkIdInvert;
 
             assertEq(0, mintIndexTire, "tire must be 0 as solid owner of token supply");
             assertEq(0, mintIndexChunk, "first drop can be only in first chunk");
 
-            assertEq(0, accountInfo.shadowIndexTireInvert, "shadow index tire expected to be unitialised");
-            assertEq(0, accountInfo.shadowIndexChunkInvert, "shadow index chunk expected to be unitialised");
-            assertEq(0, accountInfo.shadowIndexId, "shadow index id expected to be unitialised");
+            assertEq(0, accountInfo.tirePoitnters[(currentMintIndex + 1) % 2].tireIdInvert, "shadow index tire expected to be unitialised");
+            assertEq(0, accountInfo.tirePoitnters[(currentMintIndex + 1) % 2].chunkIdInvert, "shadow index chunk expected to be unitialised");
+            assertEq(0, accountInfo.tirePoitnters[(currentMintIndex + 1) % 2].indexId, "shadow index id expected to be unitialised");
 
             console.log(" Index contents");
 
-            uint256 currentMintIndex = TokenContract.ActiveMintIndex();
             uint256 totalSupply = TokenContract.MintIndexes(currentMintIndex);
 
             assertEq(airdropSize, totalSupply, "First total supply must match airdrop size");
@@ -1028,9 +1029,10 @@ contract CounterTest is Test {
             _printWalletBalance(lState.users[i]);
 
             AccountState memory accountInfo = TokenContract.AccountData(lState.users[i]);
-
-            uint8 mintIndexTire = ~accountInfo.mintIndexTireInvert;
-            uint16 mintIndexChunk = ~accountInfo.mintIndexChunkInvert;
+            uint256 currentMintIndex = TokenContract.ActiveMintIndex();
+        
+            uint8 mintIndexTire = ~accountInfo.tirePoitnters[currentMintIndex % 2].tireIdInvert;
+            uint16 mintIndexChunk = ~accountInfo.tirePoitnters[currentMintIndex % 2].chunkIdInvert;
 
             console.log("User tire: %d ; chunk: %d", mintIndexTire, mintIndexChunk);
 
@@ -1042,15 +1044,14 @@ contract CounterTest is Test {
 
             //No shadows at first mint
 
-            assertEq(0, accountInfo.shadowIndexTireInvert, "shadow index tire");
-            assertEq(0, accountInfo.shadowIndexChunkInvert, "shadow index chunk");
-            assertEq(0, accountInfo.shadowIndexId, "shadow index id");
+            assertEq(0, accountInfo.tirePoitnters[(currentMintIndex + 1) % 2].tireIdInvert, "shadow index tire");
+            assertEq(0, accountInfo.tirePoitnters[(currentMintIndex + 1) % 2].chunkIdInvert, "shadow index chunk");
+            assertEq(0, accountInfo.tirePoitnters[(currentMintIndex + 1) % 2].indexId, "shadow index id");
 
             
             if (lState.tires[i] != type(uint8).max) {
                 console.log(" Tire contents");
 
-                uint256 currentMintIndex = TokenContract.ActiveMintIndex();
                 (uint32 regularLength, uint32 highLength, uint32 chunksCount) = TokenContract.GetTireData(currentMintIndex, lState.tires[i]);
 
                 
@@ -1100,10 +1101,11 @@ contract CounterTest is Test {
         for (uint256 i = 0; i < (lState.users.length - 1); i++) {
             console.log("User: %d", i);
             AccountState memory accountInfo = TokenContract.AccountData(lState.users[i]);
+            uint256 currentMintIndex = TokenContract.ActiveMintIndex();
 
-            uint8 mintIndexTire = ~accountInfo.shadowIndexTireInvert;
-            uint16 mintIndexChunk = ~accountInfo.shadowIndexChunkInvert;
-            uint24 shadowIndexId = accountInfo.shadowIndexId;
+            uint8 mintIndexTire = ~accountInfo.tirePoitnters[(currentMintIndex + 1) % 2].tireIdInvert;
+            uint16 mintIndexChunk = ~accountInfo.tirePoitnters[(currentMintIndex + 1) % 2].chunkIdInvert;
+            uint24 shadowIndexId = accountInfo.tirePoitnters[(currentMintIndex + 1) % 2].indexId;
 
             console.log("User tire: %d ; chunk: %d ; indexId: %d", mintIndexTire, mintIndexChunk, shadowIndexId);
 
@@ -1142,9 +1144,10 @@ contract CounterTest is Test {
         for (uint256 i = 0; i < (lState.users.length - 1); i++) {
             console.log("User: %d", i);
             AccountState memory accountInfo = TokenContract.AccountData(lState.users[i]);
+            uint256 currentMintIndex = TokenContract.ActiveMintIndex();
 
-            uint8 mintIndexTire = ~accountInfo.mintIndexTireInvert;
-            uint16 mintIndexChunk = ~accountInfo.mintIndexChunkInvert;
+            uint8 mintIndexTire = ~accountInfo.tirePoitnters[currentMintIndex % 2].tireIdInvert;
+            uint16 mintIndexChunk = ~accountInfo.tirePoitnters[currentMintIndex % 2].chunkIdInvert;
 
             console.log("User tire: %d ; chunk: %d", mintIndexTire, mintIndexChunk);
 
@@ -1155,7 +1158,7 @@ contract CounterTest is Test {
 
                 assertEq(expectedTire, mintIndexTire, "user shadow tire");
             }
-            console.log("------------------------ NEXT USER --------------------------");
+            console.log("************************ NEXT USER **************************");
         }
     }
 

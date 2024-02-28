@@ -5,6 +5,15 @@ import "./ReflectDataModel.sol";
 import {ReflectErc20Core} from "./ReflectErc20Core.sol";
 
 abstract contract ReflectTireIndex is ReflectErc20Core {
+
+    function _getAccountTireMainIndex(address wallet) internal view returns (AccountTireIndex storage) {
+        return _accounts[wallet].tirePoitnters[ActiveMintIndex % 2];
+    }
+
+    function _getAccountTireShadowIndex(address wallet) internal view returns (AccountTireIndex storage) {
+        return _accounts[wallet].tirePoitnters[(ActiveMintIndex + 1) % 2];
+    }
+    
     
     function _getIndexTireByBalance(uint256 balance, uint256 totalSupply) internal view returns (uint8, bool) {        
         uint256 share = balance * TIRE_THRESHOLD_BASE / totalSupply;
@@ -97,13 +106,13 @@ abstract contract ReflectTireIndex is ReflectErc20Core {
 
     function _updateUserIndex(address wallet, uint256 balance) internal {
         MintIndex storage mIndex = MintIndexes[ActiveMintIndex];
-        AccountState storage account = _accounts[wallet];
+        AccountTireIndex storage accountMainTireIdx = _getAccountTireMainIndex(wallet);
 
         _userIndexState memory lState;
 
         unchecked {
-            lState.mainIndex.oldTierId = uint256(~account.mintIndexTireInvert);
-            lState.mainIndex.oldChunkId = uint256(~account.mintIndexChunkInvert);
+            lState.mainIndex.oldTierId = uint256(~accountMainTireIdx.tireIdInvert);
+            lState.mainIndex.oldChunkId = uint256(~accountMainTireIdx.chunkIdInvert);
         }
         
         {
@@ -120,13 +129,13 @@ abstract contract ReflectTireIndex is ReflectErc20Core {
                     uint256 chunkId = _appendAccountToMintIndex(mIndex, lState.mainIndex.newTire, wallet);
 
                     
-                    (account.mintIndexTireInvert, account.mintIndexChunkInvert) = 
+                    (accountMainTireIdx.tireIdInvert, accountMainTireIdx.chunkIdInvert) = 
                         (~lState.mainIndex.newTire, ~uint16(chunkId));
                 }
             } else if (lState.mainIndex.oldTierId != type(uint8).max) {
                 _dropAccountFromMintIndex(mIndex, wallet, uint8(lState.mainIndex.oldTierId), lState.mainIndex.oldChunkId);
 
-                (account.mintIndexTireInvert, account.mintIndexChunkInvert) = (0, 0);
+                (accountMainTireIdx.tireIdInvert, accountMainTireIdx.chunkIdInvert) = (0, 0);
             }
         }
 
@@ -148,7 +157,7 @@ abstract contract ReflectTireIndex is ReflectErc20Core {
             ) {
                 uint24 shadowMintIndex = ActiveMintIndex + 1;
                 MintIndex storage shadowMIndex = MintIndexes[shadowMintIndex];
-                AccountState storage accountCopy = account; //stack too deep
+                AccountTireIndex storage accountShadowTireIdx = _getAccountTireShadowIndex(wallet);
 
                 bool shadowTireFound;
                 (lState.shadowIndex.newTire, shadowTireFound) = _getIndexTireByBalance(balance, shadowMIndex.totalSupply);
@@ -159,11 +168,11 @@ abstract contract ReflectTireIndex is ReflectErc20Core {
                         {   
                             uint24 accountShadowMintIndex;                     
                             (accountShadowMintIndex, lState.shadowIndex.oldTierId) = 
-                                (accountCopy.shadowIndexId, uint256(~accountCopy.shadowIndexTireInvert));
+                                (accountShadowTireIdx.indexId, uint256(~accountShadowTireIdx.tireIdInvert));
                             
                             if (shadowMintIndex == accountShadowMintIndex) { //make sure that we're indexed
                                 if (lState.shadowIndex.oldTierId != type(uint8).max) {                            
-                                    lState.shadowIndex.oldChunkId = uint256(~accountCopy.shadowIndexChunkInvert);
+                                    lState.shadowIndex.oldChunkId = uint256(~accountShadowTireIdx.chunkIdInvert);
 
                                     _dropAccountFromMintIndex(shadowMIndex, wallet, uint8(lState.shadowIndex.oldTierId), lState.shadowIndex.oldChunkId);
                                 }
@@ -173,19 +182,19 @@ abstract contract ReflectTireIndex is ReflectErc20Core {
                         uint256 shadowChunkId = _appendAccountToMintIndex(shadowMIndex, lState.shadowIndex.newTire, wallet);
 
                         
-                        (accountCopy.shadowIndexId, accountCopy.shadowIndexTireInvert, accountCopy.shadowIndexChunkInvert) = 
+                        (accountShadowTireIdx.indexId, accountShadowTireIdx.tireIdInvert, accountShadowTireIdx.chunkIdInvert) = 
                             (shadowMintIndex, ~lState.shadowIndex.newTire, ~uint16(shadowChunkId));
                     }
                 } else if (
-                        (accountCopy.shadowIndexTireInvert != 0) &&
-                        (shadowMintIndex == accountCopy.shadowIndexId) //make sure that we're indexed
+                        (accountShadowTireIdx.tireIdInvert != 0) &&
+                        (shadowMintIndex == accountShadowTireIdx.indexId) //make sure that we're indexed
                     ) { 
-                    uint256 oldShadowTierId = uint256(~accountCopy.shadowIndexTireInvert);
-                    uint256 oldShadowChunkId = uint256(~accountCopy.shadowIndexChunkInvert);
+                    uint256 oldShadowTierId = uint256(~accountShadowTireIdx.tireIdInvert);
+                    uint256 oldShadowChunkId = uint256(~accountShadowTireIdx.chunkIdInvert);
 
                     _dropAccountFromMintIndex(shadowMIndex, wallet, uint8(oldShadowTierId), oldShadowChunkId);
                     
-                    (accountCopy.shadowIndexTireInvert, accountCopy.shadowIndexChunkInvert) = 
+                    (accountShadowTireIdx.tireIdInvert, accountShadowTireIdx.chunkIdInvert) = 
                         (0, 0);
                 }
             }

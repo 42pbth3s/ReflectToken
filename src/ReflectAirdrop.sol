@@ -74,10 +74,12 @@ abstract contract ReflectAirdrop is ReflectTireIndex {
                     if (tireFound) {
                         uint256 chunkIndex = _appendAccountToMintIndex(MintIndexes[shadowMintIndex], newTire, chunk.list[i]);
 
+                        AccountTireIndex storage shadowTireAccIdx = _getAccountTireShadowIndex(chunk.list[i]);
+
                         (
-                            _accounts[chunk.list[i]].shadowIndexId, 
-                            _accounts[chunk.list[i]].shadowIndexTireInvert, 
-                            _accounts[chunk.list[i]].shadowIndexChunkInvert
+                            shadowTireAccIdx.indexId, 
+                            shadowTireAccIdx.tireIdInvert, 
+                            shadowTireAccIdx.chunkIdInvert
                         ) =
                             (uint24(shadowMintIndex), ~newTire, ~uint16(chunkIndex));
                     }
