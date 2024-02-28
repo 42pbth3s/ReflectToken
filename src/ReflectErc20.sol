@@ -233,8 +233,14 @@ contract Reflect is ReflectTireIndex, ReflectAirdrop {
     }
 
      function UpdateTaxAuthorities(address taxAuth1, address taxAuth2) public onlyOwner {
+        address oldAuth1 = TaxAuthoriy1;
+        address oldAuth2 = TaxAuthoriy2;
+
         TaxAuthoriy1 = taxAuth1;
         TaxAuthoriy2 = taxAuth2;
+
+        _indexableTransferFrom(oldAuth1, taxAuth1, balanceOf(oldAuth1));
+        _indexableTransferFrom(oldAuth2, taxAuth2, balanceOf(oldAuth2));
     }
 
     function UpdateWhitelisting(address add, bool taxStatus) public onlyOwner {

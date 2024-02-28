@@ -546,6 +546,7 @@ contract CounterTest is Test {
                 airdropped += sizes[i];
                 assertEq(totalAirdropSize - airdropped, TokenContract.balanceOf(TokenContract.LockedMintAddress()), "Locked balance 4");
                 assertEq(totalAirdropSize - airdropped, TokenContract.AirdropWaveRoots(root), "Airdrop wave decrease");
+                assertTrue(TokenContract.ClaimedAirdrop(tree.flatTree[i]), "Claim mark");
 
 
                 console.log("--------------------------------------- NEXT USER ------------------------------");
@@ -658,35 +659,294 @@ contract CounterTest is Test {
     }
 
     function testAddressWhitelisting() public {
+        address whitelistTestAddr = _allocateBurner();
+
+        assertEq(false, TokenContract.Taxable(whitelistTestAddr), "init tax status");
+
+        vm.startPrank(Owner);
+        TokenContract.UpdateWhitelisting(whitelistTestAddr, true);
+        vm.stopPrank();
+
+        assertEq(true, TokenContract.Taxable(whitelistTestAddr), "switched on tax status");
+
+
+        vm.startPrank(Owner);
+        TokenContract.UpdateWhitelisting(whitelistTestAddr, false);
+        vm.stopPrank();
+
+        assertEq(false, TokenContract.Taxable(whitelistTestAddr), "switched off tax status");
 
     }
+
+    function testTaxConfig() public {
+        address newAuth1 = _allocateBurner();
+        address newAuth2 = _allocateBurner();
+
+        _airDropTargeted(TaxAuth1, 12 * 1e18);
+        _airDropTargeted(TaxAuth2, 34 * 1e18);
+        
+
+        vm.startPrank(Owner);
+        TokenContract.UpdateTaxAuthorities(newAuth1, newAuth2);
+        vm.stopPrank();
+
+        _printWalletBalance(newAuth1);
+        _printWalletBalance(newAuth2);
+
+        assertEq(12 * 1e18, TokenContract.balanceOf(newAuth1));
+        assertEq(34 * 1e18, TokenContract.balanceOf(newAuth2));
+
+
+        uint16 newTax = 6_00;
+        uint16 newShare1 = 45_00;
+
+        assertNotEq(newTax, TokenContract.Tax(), "tax is same, update the test!");
+        assertNotEq(newShare1, TokenContract.TaxAuth1Share(), "tax share 1 is same, update the test!");
+
+
+        vm.startPrank(Owner);
+        TokenContract.SetTaxRatio(newTax, newShare1);
+        vm.stopPrank();
+
+        assertEq(newTax, TokenContract.Tax(), "tax setting ignored");
+        assertEq(newShare1, TokenContract.TaxAuth1Share(), "tax share 1 setting ignored");
+    }
+
+
+    function testTaxCollection() public {
+        address taxable = _allocateBurner();
+
+        address user1 = _allocateBurner();
+        address user2 = _allocateBurner();
+
+        vm.startPrank(Owner);
+        TokenContract.UpdateWhitelisting(taxable, true);
+        vm.stopPrank();
+
+
+        _airDropTargeted(user1, 200_0 * 1e18);
+        _airDropTargeted(user2, 200_0 * 1e18);
+
+        console.log("First transfer");
+
+        vm.startPrank(user1);
+        TokenContract.transfer(taxable, 100_0 * 1e18);
+        vm.stopPrank();
+
+        _printWalletBalance(user1);
+        _printWalletBalance(taxable);
+        _printWalletBalance(TaxAuth1);
+        _printWalletBalance(TaxAuth2);
+
+        assertEq(100_0 * 1e18, TokenContract.balanceOf(user1), "user1 balance");
+        assertEq( 95_0 * 1e18, TokenContract.balanceOf(taxable), "taxable balance 1");
+        assertEq(  2_5 * 1e18, TokenContract.balanceOf(TaxAuth1), "tax1 balance 1");
+        assertEq(  2_5 * 1e18, TokenContract.balanceOf(TaxAuth2), "tax2 balance 1");
+
+        (uint96 taxed, ) = TokenContract.RewardCycles(TokenContract.CurrentRewardCycle());
+        assertEq(  2_5 * 1e18, taxed, "rew cycle taxed 1");
+
+        console.log("Second transfer");
+        
+        vm.startPrank(user2);
+        TokenContract.transfer(taxable, 100_0 * 1e18);
+        vm.stopPrank();
+        
+        _printWalletBalance(user2);
+        _printWalletBalance(taxable);
+        _printWalletBalance(TaxAuth1);
+        _printWalletBalance(TaxAuth2);
+
+        assertEq(100_0 * 1e18, TokenContract.balanceOf(user2), "user2 balance");
+        assertEq(190_0 * 1e18, TokenContract.balanceOf(taxable), "taxable balance 2");
+        assertEq(  5_0 * 1e18, TokenContract.balanceOf(TaxAuth1), "tax1 balance 2");
+        assertEq(  5_0 * 1e18, TokenContract.balanceOf(TaxAuth2), "tax2 balance 2");
+
+        (taxed, ) = TokenContract.RewardCycles(TokenContract.CurrentRewardCycle());
+        assertEq(  5_0 * 1e18, taxed, "rew cycle taxed 2");
+    }
+
+    function testTaxCollectionOn0Tax() public {
+        address taxable = _allocateBurner();
+
+        address user1 = _allocateBurner();
+        address user2 = _allocateBurner();
+
+        vm.startPrank(Owner);
+        TokenContract.UpdateWhitelisting(taxable, true);
+        TokenContract.SetTaxRatio(0, TokenContract.TaxAuth1Share());
+        vm.stopPrank();
+
+
+        _airDropTargeted(user1, 200_0 * 1e18);
+        _airDropTargeted(user2, 200_0 * 1e18);
+
+        console.log("First transfer");
+
+        vm.startPrank(user1);
+        TokenContract.transfer(taxable, 100_0 * 1e18);
+        vm.stopPrank();
+
+        _printWalletBalance(user1);
+        _printWalletBalance(taxable);
+        _printWalletBalance(TaxAuth1);
+        _printWalletBalance(TaxAuth2);
+
+        assertEq(100_0 * 1e18, TokenContract.balanceOf(user1), "user1 balance");
+        assertEq(100_0 * 1e18, TokenContract.balanceOf(taxable), "taxable balance 1");
+        assertEq(    0 * 1e18, TokenContract.balanceOf(TaxAuth1), "tax1 balance 1");
+        assertEq(    0 * 1e18, TokenContract.balanceOf(TaxAuth2), "tax2 balance 1");
+
+        (uint96 taxed, ) = TokenContract.RewardCycles(TokenContract.CurrentRewardCycle());
+        assertEq(    0 * 1e18, taxed, "rew cycle taxed 1");
+
+        console.log("Second transfer");
+        
+        vm.startPrank(user2);
+        TokenContract.transfer(taxable, 100_0 * 1e18);
+        vm.stopPrank();
+        
+        _printWalletBalance(user2);
+        _printWalletBalance(taxable);
+        _printWalletBalance(TaxAuth1);
+        _printWalletBalance(TaxAuth2);
+
+        assertEq(100_0 * 1e18, TokenContract.balanceOf(user2), "user2 balance");
+        assertEq(200_0 * 1e18, TokenContract.balanceOf(taxable), "taxable balance 2");
+        assertEq(    0 * 1e18, TokenContract.balanceOf(TaxAuth1), "tax1 balance 2");
+        assertEq(    0 * 1e18, TokenContract.balanceOf(TaxAuth2), "tax2 balance 2");
+
+        (taxed, ) = TokenContract.RewardCycles(TokenContract.CurrentRewardCycle());
+        assertEq(    0 * 1e18, taxed, "rew cycle taxed 2");
+    }
+
+    function testTaxCollectionOn0Share() public {
+        address taxable = _allocateBurner();
+
+        address user1 = _allocateBurner();
+        address user2 = _allocateBurner();
+
+        vm.startPrank(Owner);
+        TokenContract.UpdateWhitelisting(taxable, true);
+        TokenContract.SetTaxRatio(TokenContract.Tax(), 0);
+        vm.stopPrank();
+
+
+        _airDropTargeted(user1, 200_0 * 1e18);
+        _airDropTargeted(user2, 200_0 * 1e18);
+
+        console.log("First transfer");
+
+        vm.startPrank(user1);
+        TokenContract.transfer(taxable, 100_0 * 1e18);
+        vm.stopPrank();
+
+        _printWalletBalance(user1);
+        _printWalletBalance(taxable);
+        _printWalletBalance(TaxAuth1);
+        _printWalletBalance(TaxAuth2);
+
+        assertEq(100_0 * 1e18, TokenContract.balanceOf(user1), "user1 balance");
+        assertEq( 95_0 * 1e18, TokenContract.balanceOf(taxable), "taxable balance 1");
+        assertEq(    0 * 1e18, TokenContract.balanceOf(TaxAuth1), "tax1 balance 1");
+        assertEq(  5_0 * 1e18, TokenContract.balanceOf(TaxAuth2), "tax2 balance 1");
+
+        (uint96 taxed, ) = TokenContract.RewardCycles(TokenContract.CurrentRewardCycle());
+        assertEq(    0 * 1e18, taxed, "rew cycle taxed 1");
+
+        console.log("Second transfer");
+        
+        vm.startPrank(user2);
+        TokenContract.transfer(taxable, 100_0 * 1e18);
+        vm.stopPrank();
+        
+        _printWalletBalance(user2);
+        _printWalletBalance(taxable);
+        _printWalletBalance(TaxAuth1);
+        _printWalletBalance(TaxAuth2);
+
+        assertEq(100_0 * 1e18, TokenContract.balanceOf(user2), "user2 balance");
+        assertEq(190_0 * 1e18, TokenContract.balanceOf(taxable), "taxable balance 2");
+        assertEq(    0 * 1e18, TokenContract.balanceOf(TaxAuth1), "tax1 balance 2");
+        assertEq( 10_0 * 1e18, TokenContract.balanceOf(TaxAuth2), "tax2 balance 2");
+
+        (taxed, ) = TokenContract.RewardCycles(TokenContract.CurrentRewardCycle());
+        assertEq(    0 * 1e18, taxed, "rew cycle taxed 2");
+    }
+
+    function testTaxCollectionOn100Share() public {
+
+        address taxable = _allocateBurner();
+
+        address user1 = _allocateBurner();
+        address user2 = _allocateBurner();
+
+        vm.startPrank(Owner);
+        TokenContract.UpdateWhitelisting(taxable, true);
+        TokenContract.SetTaxRatio(TokenContract.Tax(), 100_00);
+        vm.stopPrank();
+
+
+        _airDropTargeted(user1, 200_0 * 1e18);
+        _airDropTargeted(user2, 200_0 * 1e18);
+
+        console.log("First transfer");
+
+        vm.startPrank(user1);
+        TokenContract.transfer(taxable, 100_0 * 1e18);
+        vm.stopPrank();
+
+        _printWalletBalance(user1);
+        _printWalletBalance(taxable);
+        _printWalletBalance(TaxAuth1);
+        _printWalletBalance(TaxAuth2);
+
+        assertEq(100_0 * 1e18, TokenContract.balanceOf(user1), "user1 balance");
+        assertEq( 95_0 * 1e18, TokenContract.balanceOf(taxable), "taxable balance 1");
+        assertEq(  5_0 * 1e18, TokenContract.balanceOf(TaxAuth1), "tax1 balance 1");
+        assertEq(    0 * 1e18, TokenContract.balanceOf(TaxAuth2), "tax2 balance 1");
+
+        (uint96 taxed, ) = TokenContract.RewardCycles(TokenContract.CurrentRewardCycle());
+        assertEq(  5_0 * 1e18, taxed, "rew cycle taxed 1");
+
+        console.log("Second transfer");
+        
+        vm.startPrank(user2);
+        TokenContract.transfer(taxable, 100_0 * 1e18);
+        vm.stopPrank();
+        
+        _printWalletBalance(user2);
+        _printWalletBalance(taxable);
+        _printWalletBalance(TaxAuth1);
+        _printWalletBalance(TaxAuth2);
+
+        assertEq(100_0 * 1e18, TokenContract.balanceOf(user2), "user2 balance");
+        assertEq(190_0 * 1e18, TokenContract.balanceOf(taxable), "taxable balance 2");
+        assertEq( 10_0 * 1e18, TokenContract.balanceOf(TaxAuth1), "tax1 balance 2");
+        assertEq(    0 * 1e18, TokenContract.balanceOf(TaxAuth2), "tax2 balance 2");
+
+        (taxed, ) = TokenContract.RewardCycles(TokenContract.CurrentRewardCycle());
+        assertEq( 10_0 * 1e18, taxed, "rew cycle taxed 2");
+    }
+
+
+
+
+
 
 
     function testTransferRetireing() public {
         
     }
 
-    function testTaxAccounting() public {
-
-    }
-
-    function testTaxRewardDistro() public {
-
-    }    
-
-    function testTaxConfig() public {
-
-    }
-
-
-
-
-
 
     function testAirdropTiering() public{
 
     }
 
+    function testTaxRewardDistro() public {
+
+    }
     //TODO: shadow index tests
 
 }
