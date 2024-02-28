@@ -36,6 +36,7 @@ abstract contract ReflectErc20Core is Ownable2Step, IERC20, IERC20Metadata, IERC
 
     mapping (address => bool)           public                  Taxable;
     mapping (bytes32 => uint256)        public                  AirdropWaveRoots;
+    mapping (bytes32 => bool)           public                  RegistredAirdrop;
     mapping (bytes32 => bool)           public                  ClaimedAirdrop;
     mapping (bytes32 => bool)           public                  RewardRoots;
     mapping (bytes32 => bool)           public                  ClaimedReward;

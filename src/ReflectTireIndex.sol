@@ -133,14 +133,12 @@ abstract contract ReflectTireIndex is ReflectErc20Core {
 
 
         //Shall happen on very rare ocasions
-        //if were not into index before - there is now way we will occur in shadow
+        //if were not into index before - there is now way that we will occur in shadow
         if ((lState.mainIndex.oldTierId != type(uint8).max) && _shadowMintIndexEnabled()) {
-            //TODO: Check that we're reached stage of main index
-
             uint8 lastShadowIndexedTire = ~_lastShadowIndexedTireInvert;
             uint16 lastShadowIndexedChunk = ~_lastShadowIndexedChunkInvert;
 
-            //only if was indexed into shadow again - we need to go into it
+            //only if was indexed into shadow - we need to go into it again
             if (
                 (lState.mainIndex.oldTierId < lastShadowIndexedTire) ||
                 (
@@ -176,7 +174,7 @@ abstract contract ReflectTireIndex is ReflectErc20Core {
 
                         
                         (accountCopy.shadowIndexId, accountCopy.shadowIndexTireInvert, accountCopy.shadowIndexChunkInvert) = 
-                            (ActiveMintIndex + 1, ~lState.shadowIndex.newTire, ~uint16(shadowChunkId));
+                            (shadowMintIndex, ~lState.shadowIndex.newTire, ~uint16(shadowChunkId));
                     }
                 } else if (
                         (accountCopy.shadowIndexTireInvert != 0) &&
@@ -187,8 +185,8 @@ abstract contract ReflectTireIndex is ReflectErc20Core {
 
                     _dropAccountFromMintIndex(shadowMIndex, wallet, uint8(oldShadowTierId), oldShadowChunkId);
                     
-                    (accountCopy.shadowIndexId, accountCopy.shadowIndexTireInvert, accountCopy.shadowIndexChunkInvert) = 
-                        (ActiveMintIndex + 1, 0, 0);
+                    (accountCopy.shadowIndexTireInvert, accountCopy.shadowIndexChunkInvert) = 
+                        (0, 0);
                 }
             }
         }

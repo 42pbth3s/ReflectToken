@@ -242,7 +242,7 @@ contract CounterTest is Test {
         return tree;
     }
 
-    function _extractMerkleProof(MerkelTree memory tree, uint256 item) private view returns(bytes32[] memory) {
+    function _extractMerkleProof(MerkelTree memory tree, uint256 item) private pure returns(bytes32[] memory) {
         require(item < tree.lvlLength[0]);
 
         bytes32[] memory proof = new bytes32[](tree.lvlLength.length - 1);
@@ -344,7 +344,7 @@ contract CounterTest is Test {
 
         AccountState memory accountInfo = TokenContract.AccountData(testUser);
 
-        {            
+        {
             console.log(" Account pointers");
 
             uint8 mintIndexTire = ~accountInfo.mintIndexTireInvert;
@@ -931,8 +931,233 @@ contract CounterTest is Test {
 
 
 
+    struct _airDropTireingState {
+        address[]  users;
+        uint256[]  sizes;
+        uint8[]    tires;
+        uint256    totalAirdrop;
+        bytes32    root;
+
+        MerkelTree tree;
+    }
+
+    function testAirdropTiering() public{
+        _airDropTireingState memory lState;
+
+        lState.users = new address[](19);
+        lState.sizes = new uint256[](lState.users.length);
+        lState.tires = new uint8[](lState.users.length - 1);
+
+        lState.totalAirdrop = 10_000_000 * 1e18;
+
+        for (uint256 i = 0; i < lState.users.length; i++) {
+            lState.users[i] = _allocateBurner();
+        }
+
+        //           100_0000
+        lState.sizes[0] =    (1_5000 * lState.totalAirdrop) / 100_0000;
+        lState.sizes[1] =    (1_0000 * lState.totalAirdrop) / 100_0000;
+        lState.tires[0] = 0;
+        lState.tires[1] = 0;
+
+        lState.sizes[2] =    (  8000 * lState.totalAirdrop) / 100_0000;
+        lState.sizes[3] =    (  7000 * lState.totalAirdrop) / 100_0000;
+        lState.tires[2] = 1;
+        lState.tires[3] = 1;
+        
+        lState.sizes[4] =    (  4000 * lState.totalAirdrop) / 100_0000;
+        lState.sizes[5] =    (  3000 * lState.totalAirdrop) / 100_0000;
+        lState.tires[4] = 2;
+        lState.tires[5] = 2;
+        
+        lState.sizes[6] =    (  1000 * lState.totalAirdrop) / 100_0000;
+        lState.sizes[7] =    (   900 * lState.totalAirdrop) / 100_0000;
+        lState.tires[6] = 3;
+        lState.tires[7] = 3;
+    
+        lState.sizes[8] =    (   700 * lState.totalAirdrop) / 100_0000;
+        lState.sizes[9] =    (   600 * lState.totalAirdrop) / 100_0000;
+        lState.tires[8] = 4;
+        lState.tires[9] = 4;
+        
+        lState.sizes[10] =   (   400 * lState.totalAirdrop) / 100_0000;
+        lState.sizes[11] =   (   300 * lState.totalAirdrop) / 100_0000;
+        lState.tires[10] = 5;
+        lState.tires[11] = 5;
+        
+        lState.sizes[12] =   (   100 * lState.totalAirdrop) / 100_0000;
+        lState.sizes[13] =   (    90 * lState.totalAirdrop) / 100_0000;
+        lState.tires[12] = 6;
+        lState.tires[13] = 6;
+        
+        lState.sizes[14] =   (    60 * lState.totalAirdrop) / 100_0000;
+        lState.sizes[15] =   (    50 * lState.totalAirdrop) / 100_0000;
+        lState.tires[14] = 7;
+        lState.tires[15] = 7;
+        
+        lState.sizes[16] =   (    40 * lState.totalAirdrop) / 100_0000;
+        lState.sizes[17] =   (    30 * lState.totalAirdrop) / 100_0000;
+        lState.tires[16] = type(uint8).max;
+        lState.tires[17] = type(uint8).max;
+
+        lState.sizes[18] = lState.totalAirdrop;
+
+        for (uint256 i = 0; i < (lState.sizes.length - 1); i++) {
+            lState.sizes[18] -= lState.sizes[i];
+        }
+
+        lState.tree = _generateAirdropMerkleTree(lState.users, lState.sizes);
+        lState.root = lState.tree.flatTree[lState.tree.flatTree.length - 1];
 
 
+        vm.startPrank(Owner);
+        TokenContract.PrepareAirdrop(lState.root, lState.totalAirdrop, 20_000);
+        TokenContract.IndexShadow(20_000);
+        TokenContract.LaunchAirdrop();
+        vm.stopPrank();
+
+        for (uint256 i = 0; i < (lState.users.length - 1); i++) {
+            console.log("User: %d", i);
+
+            bytes32[] memory proof = _extractMerkleProof(lState.tree, i);
+
+            vm.startPrank(lState.users[i]);
+            TokenContract.Airdrop(lState.root, proof, lState.sizes[i]);
+            vm.stopPrank();
+
+            _printWalletBalance(lState.users[i]);
+
+            AccountState memory accountInfo = TokenContract.AccountData(lState.users[i]);
+
+            uint8 mintIndexTire = ~accountInfo.mintIndexTireInvert;
+            uint16 mintIndexChunk = ~accountInfo.mintIndexChunkInvert;
+
+            console.log("User tire: %d ; chunk: %d", mintIndexTire, mintIndexChunk);
+
+            assertEq(lState.tires[i], mintIndexTire, "user tire");
+            if (lState.tires[i] != type(uint8).max)
+                assertEq(0, mintIndexChunk, "user chunk");
+            else
+                assertEq(type(uint16).max, mintIndexChunk, "user chunk 2");
+
+            //No shadows at first mint
+
+            assertEq(0, accountInfo.shadowIndexTireInvert, "shadow index tire");
+            assertEq(0, accountInfo.shadowIndexChunkInvert, "shadow index chunk");
+            assertEq(0, accountInfo.shadowIndexId, "shadow index id");
+
+            
+            if (lState.tires[i] != type(uint8).max) {
+                console.log(" Tire contents");
+
+                uint256 currentMintIndex = TokenContract.ActiveMintIndex();
+                (uint32 regularLength, uint32 highLength, uint32 chunksCount) = TokenContract.GetTireData(currentMintIndex, lState.tires[i]);
+
+                
+                assertEq(1 + (i & 1), regularLength, "tire reg memb");
+                assertEq(0, highLength, "tire high rewardmemb");
+                assertEq(1, chunksCount, "tire chunks");
+
+
+                console.log(" Chunk contents");
+                (uint8 chunkLen, address[CHUNK_SIZE] memory chunkList) = TokenContract.GetTireChunk(currentMintIndex, lState.tires[i], 0);
+
+                
+                assertEq(1 + (i & 1), chunkLen, "chunk length");
+                assertEq(lState.users[i], chunkList[i & 1], "chunk list entry");
+            }
+            console.log("++++++++++++++++++++++++ NEXT USER ++++++++++++++++++++++++++");
+        }
+
+        console.log("Start checking shadow index & reshuffle");
+
+        //Shifting everyhting on 0.001%
+        {
+            // 100_0000
+            //   0_0010 -> 10
+            //  99_9990
+
+            uint256 extraSupply = (lState.totalAirdrop * 100_0000_0) / 99_9990; //an extra 10 for rounding up below
+
+            if ((extraSupply % 10) != 0) {
+                extraSupply += 10; // rounding up
+            }
+            extraSupply /= 10; //dropping last digit
+            extraSupply -= lState.totalAirdrop;
+
+            
+            // Do not complete operation
+            // to sanity check shadow index
+            vm.startPrank(Owner);
+            TokenContract.PrepareAirdrop(bytes32(uint256(1)), extraSupply, 20_000);
+            TokenContract.IndexShadow(20_000);
+            vm.stopPrank();
+        }
+
+        //start checking
+
+        
+        for (uint256 i = 0; i < (lState.users.length - 1); i++) {
+            console.log("User: %d", i);
+            AccountState memory accountInfo = TokenContract.AccountData(lState.users[i]);
+
+            uint8 mintIndexTire = ~accountInfo.shadowIndexTireInvert;
+            uint16 mintIndexChunk = ~accountInfo.shadowIndexChunkInvert;
+            uint24 shadowIndexId = accountInfo.shadowIndexId;
+
+            console.log("User tire: %d ; chunk: %d ; indexId: %d", mintIndexTire, mintIndexChunk, shadowIndexId);
+
+            if (lState.tires[i] != type(uint8).max) {
+                uint8 expectedTire = lState.tires[i] + uint8(i & 1);
+                if (expectedTire == FEE_TIRES)
+                    expectedTire = type(uint8).max;
+
+                assertEq(expectedTire, mintIndexTire, "user shadow tire");
+                if (expectedTire != type(uint8).max) {
+                    assertEq(2, shadowIndexId, "user shadow index 1");
+                } else {
+                    assertEq(0, shadowIndexId, "user shadow index 2");
+                }
+            } else {
+                assertEq(0, shadowIndexId, "user shadow index 3");
+            }
+            console.log("------------------------ NEXT USER --------------------------");
+        }
+
+        //switching to main
+        console.log("Switching shadow index to main");
+
+        {
+            address someUser = _allocateBurner();
+        
+            vm.startPrank(Owner);
+            TokenContract.MintTo(someUser);
+            vm.stopPrank();
+
+            assertEq(2, TokenContract.ActiveMintIndex(), "mint index 2");
+        }
+
+        console.log("Validating main index");
+        
+        for (uint256 i = 0; i < (lState.users.length - 1); i++) {
+            console.log("User: %d", i);
+            AccountState memory accountInfo = TokenContract.AccountData(lState.users[i]);
+
+            uint8 mintIndexTire = ~accountInfo.mintIndexTireInvert;
+            uint16 mintIndexChunk = ~accountInfo.mintIndexChunkInvert;
+
+            console.log("User tire: %d ; chunk: %d", mintIndexTire, mintIndexChunk);
+
+            if (lState.tires[i] != type(uint8).max) {
+                uint8 expectedTire = lState.tires[i] + uint8(i & 1);
+                if (expectedTire == FEE_TIRES)
+                    expectedTire = type(uint8).max;
+
+                assertEq(expectedTire, mintIndexTire, "user shadow tire");
+            }
+            console.log("------------------------ NEXT USER --------------------------");
+        }
+    }
 
 
     function testTransferRetireing() public {
@@ -940,9 +1165,6 @@ contract CounterTest is Test {
     }
 
 
-    function testAirdropTiering() public{
-
-    }
 
     function testTaxRewardDistro() public {
 
