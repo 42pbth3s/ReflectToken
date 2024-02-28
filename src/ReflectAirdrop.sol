@@ -21,10 +21,13 @@ abstract contract ReflectAirdrop is ReflectTireIndex {
         require(root != bytes32(type(uint256).max), "Invalid root has been supplied");
         require(_nextAirdropRoot == bytes32(type(uint256).max), "Airdrop already launched");
         require(!RegistredAirdrop[root], "This airdrop has already been registred");
+        require(totalAmount > 0, "Airdrop shall be positive");
 
         _nextAirdropRoot = root;
         _nextAirdrop = totalAmount;
-        RegistredAirdrop[root] = true;
+        
+        if (root != bytes32(uint256(1)))
+            RegistredAirdrop[root] = true;
 
         uint256 activeMintIndex = ActiveMintIndex;
         uint256 nextTotalSupply = MintIndexes[activeMintIndex].totalSupply;
