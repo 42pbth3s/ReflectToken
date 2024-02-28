@@ -81,15 +81,14 @@ abstract contract ReflectTireIndex is ReflectErc20Core {
     function _updateUserIndex(address wallet, uint256 balance) internal {
         MintIndex storage mIndex = MintIndexes[ActiveMintIndex];
         AccountState storage account = _accounts[wallet];
+        uint256 oldTierId = ~uint256(account.mintIndexTireInvert);
+        uint256 oldChunkId = ~uint256(account.mintIndexChunkInvert);
         
         (uint8 newTire, bool tireFound) = _getIndexTireByBalance(balance, mIndex.totalSupply);
 
         if (tireFound) {
-            uint256 oldTierId = ~uint256(account.mintIndexTireInvert);
             
             if (oldTierId != type(uint256).max) {
-                uint256 oldChunkId = ~uint256(account.mintIndexChunkInvert);
-
                 _dropAccountFromMintIndex(mIndex, wallet, uint8(oldTierId), oldChunkId);
             }
 
@@ -99,10 +98,7 @@ abstract contract ReflectTireIndex is ReflectErc20Core {
             (account.mintIndexTireInvert, account.mintIndexChunkInvert) = 
                 (~newTire, ~uint16(chunkId));
 
-        } else if (account.mintIndexTireInvert != 0) {
-            uint256 oldTierId = ~uint256(account.mintIndexTireInvert);
-            uint256 oldChunkId = ~uint256(account.mintIndexChunkInvert);
-
+        } else if (oldTierId != type(uint256).max) {
             _dropAccountFromMintIndex(mIndex, wallet, uint8(oldTierId), oldChunkId);
 
             (account.mintIndexTireInvert, account.mintIndexChunkInvert) = (0, 0);
@@ -110,34 +106,46 @@ abstract contract ReflectTireIndex is ReflectErc20Core {
 
 
         //Shall happen on very rare ocasions
-        if (_shadowMintIndexEnabled()) {
-            MintIndex storage shadowMIndex = MintIndexes[ActiveMintIndex + 1];
+        //if were not into index before - there is now way we will occur in shadow
+        if ((oldTierId != type(uint256).max) && _shadowMintIndexEnabled()) {
+            //TODO: Check that we're reached stage of main index
 
-            (uint8 newShadowTire, bool shadowTireFound) = _getIndexTireByBalance(balance, shadowMIndex.totalSupply);
+            uint8 lastShadowIndexedTire = ~_lastShadowIndexedTireInvert;
+            uint16 lastShadowIndexedChunk = ~_lastShadowIndexedChunkInvert;
 
-            if (shadowTireFound) {
-                uint256 oldShadowTierId = ~uint256(account.shadowIndexTireInvert);
-                
-                if (oldShadowTierId != type(uint256).max) {
+            //only if was indexed into shadow again - we need to go into it
+            if (
+                (oldTierId < lastShadowIndexedTire) ||
+                ((oldTierId == lastShadowIndexedTire) && (oldChunkId < lastShadowIndexedChunk))
+            ) {
+                MintIndex storage shadowMIndex = MintIndexes[ActiveMintIndex + 1];
+
+                (uint8 newShadowTire, bool shadowTireFound) = _getIndexTireByBalance(balance, shadowMIndex.totalSupply);
+
+                if (shadowTireFound) {
+                    uint256 oldShadowTierId = ~uint256(account.shadowIndexTireInvert);
+                    
+                    if (oldShadowTierId != type(uint256).max) {
+                        uint256 oldShadowChunkId = ~uint256(account.shadowIndexChunkInvert);
+
+                        _dropAccountFromMintIndex(shadowMIndex, wallet, uint8(oldShadowTierId), oldShadowChunkId);
+                    }
+
+                    uint256 shadowChunkId = _appendAccountToMintIndex(shadowMIndex, newTire, wallet);
+
+                    
+                    (account.shadowIndexId, account.shadowIndexTireInvert, account.shadowIndexChunkInvert) = 
+                        (ActiveMintIndex + 1, ~newShadowTire, ~uint16(shadowChunkId));
+
+                } else if (account.shadowIndexTireInvert != 0) {
+                    uint256 oldShadowTierId = ~uint256(account.shadowIndexTireInvert);
                     uint256 oldShadowChunkId = ~uint256(account.shadowIndexChunkInvert);
 
                     _dropAccountFromMintIndex(shadowMIndex, wallet, uint8(oldShadowTierId), oldShadowChunkId);
+                    
+                    (account.shadowIndexId, account.shadowIndexTireInvert, account.shadowIndexChunkInvert) = 
+                        (ActiveMintIndex + 1, 0, 0);
                 }
-
-                uint256 shadowChunkId = _appendAccountToMintIndex(shadowMIndex, newTire, wallet);
-
-                
-                (account.shadowIndexId, account.shadowIndexTireInvert, account.shadowIndexChunkInvert) = 
-                    (ActiveMintIndex + 1, ~newShadowTire, ~uint16(shadowChunkId));
-
-            } else if (account.shadowIndexTireInvert != 0) {
-                uint256 oldShadowTierId = ~uint256(account.shadowIndexTireInvert);
-                uint256 oldShadowChunkId = ~uint256(account.shadowIndexChunkInvert);
-
-                _dropAccountFromMintIndex(shadowMIndex, wallet, uint8(oldShadowTierId), oldShadowChunkId);
-                
-                (account.shadowIndexId, account.shadowIndexTireInvert, account.shadowIndexChunkInvert) = 
-                    (ActiveMintIndex + 1, 0, 0);
             }
         }
     }
