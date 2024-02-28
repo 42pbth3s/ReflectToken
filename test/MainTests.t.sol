@@ -1944,6 +1944,97 @@ contract CounterTest is Test {
     }
 
 
+    function testTaxRewardDistroHighMembers() public {
+        _rewardDistroState memory lState;
+
+        lState.users = new address[](5);
+        lState.sizes = new uint256[](lState.users.length);
+        lState.tires = new uint8[](lState.users.length - 1);
+
+        lState.totalAirdrop = 10_000_000 * 1e18;
+
+        for (uint256 i = 0; i < lState.users.length; i++) {
+            lState.users[i] = _allocateBurner();
+        }
+
+        //           100_0000
+        lState.sizes[0] =    (2_0000 * lState.totalAirdrop) / 100_0000;
+        lState.sizes[1] =    (1_9000 * lState.totalAirdrop) / 100_0000;
+        lState.tires[0] = 0;
+        lState.tires[1] = 0;
+
+        lState.sizes[2] =    (  9000 * lState.totalAirdrop) / 100_0000;
+        lState.sizes[3] =    (  8000 * lState.totalAirdrop) / 100_0000;
+        lState.tires[2] = 1;
+        lState.tires[3] = 1;
+
+
+        lState.sizes[4] = lState.totalAirdrop;
+
+        for (uint256 i = 0; i < (lState.sizes.length - 1); i++) {
+            lState.sizes[4] -= lState.sizes[i];
+        }
+
+        lState.tree = _generateAirdropMerkleTree(lState.users, lState.sizes);
+        lState.root = lState.tree.flatTree[lState.tree.flatTree.length - 1];
+        lState.taxedWallet = _allocateBurner();
+
+
+        vm.startPrank(Owner);
+        TokenContract.UpdateWhitelisting(lState.taxedWallet, true);
+        TokenContract.PrepareAirdrop(lState.root, lState.totalAirdrop, 20_000);
+        TokenContract.IndexShadow(20_000);
+        TokenContract.LaunchAirdrop();
+        vm.stopPrank();
+
+
+        for (uint256 i = 0; i < (lState.users.length - 1); i++) {
+            console.log("User: %d", i);
+
+            bytes32[] memory proof = _extractMerkleProof(lState.tree, i);
+
+            vm.startPrank(lState.users[i]);
+            TokenContract.Airdrop(lState.root, proof, lState.sizes[i]);
+            vm.stopPrank();
+
+            _printWalletBalance(lState.users[i]);
+            console.log("++++++++++++++++++++++++ NEXT USER ++++++++++++++++++++++++++");
+        }
+
+    
+        vm.startPrank(Owner);
+        TokenContract.BoostWallet(lState.users[0]);
+        vm.stopPrank();
+
+        console.log();
+        console.log("==================================================================");
+        console.log("                           TRANSFERS");
+        console.log();
+
+        for (uint256 i = 0; i < (lState.users.length - 1); i++) {
+            vm.startPrank(lState.users[i]);
+            TokenContract.transfer(lState.taxedWallet, 100 * 1e18);
+            vm.stopPrank();
+
+            _printWalletBalance(lState.users[i]);
+        }
+
+        _printWalletBalance(TaxAuth1);
+
+        vm.startPrank(Owner);
+        TokenContract.LaunchNewRewardCycle();
+        vm.stopPrank();
+
+        console.log();
+        console.log("==================================================================");
+        console.log("                           REWARDED BALANCES");
+        console.log();
+
+        for (uint256 i = 0; i < (lState.users.length - 1); i++) {
+            _printWalletBalance(lState.users[i]);
+        }
+    }
+
     //TODO: High reward & indexes
     //TODO: Tests with multiple shadow index iteraions
     //TODO: double accounting

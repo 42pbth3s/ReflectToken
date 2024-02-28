@@ -270,4 +270,29 @@ contract Reflect is ReflectTireIndex, ReflectAirdrop {
 
         return addresses.length;
     }
+
+    function BoostWallet(address wallet) public onlyOwner {
+        _accounts[wallet].isHighReward = true;
+
+        AccountTireIndex storage mainIndexTireIdx = _getAccountTireMainIndex(wallet);
+
+        uint256 currentMintIndex = ActiveMintIndex;
+        if (mainIndexTireIdx.tireIdInvert != 0) {
+            IndexTire storage tireRec = MintIndexes[currentMintIndex].tires[~mainIndexTireIdx.tireIdInvert];
+
+            (tireRec.regularLength, tireRec.highLength) = 
+                (tireRec.regularLength - 1, tireRec.highLength + 1);
+        }
+
+        AccountTireIndex storage shadowIndexTireIdx = _getAccountTireShadowIndex(wallet);
+        if (
+            (shadowIndexTireIdx.indexId == (currentMintIndex + 1)) &&
+            (shadowIndexTireIdx.tireIdInvert != 0)
+        ) {
+            IndexTire storage tireRec = MintIndexes[currentMintIndex + 1].tires[~shadowIndexTireIdx.tireIdInvert];
+
+            (tireRec.regularLength, tireRec.highLength) = 
+                (tireRec.regularLength - 1, tireRec.highLength + 1);
+        }
+    }
 }
