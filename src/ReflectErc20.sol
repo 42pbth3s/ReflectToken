@@ -18,6 +18,16 @@ contract Reflect is ReflectTireIndex, ReflectAirdrop {
         TaxRewardShare = rewardShare;
         TaxAuthoriy1 = taxAuth1;
         TaxAuthoriy2 = taxAuth2;
+
+        (_tireThresholds[0], _tireThresholds[1], _tireThresholds[2], _tireThresholds[3], 
+         _tireThresholds[4], _tireThresholds[5], _tireThresholds[6], _tireThresholds[7]) =
+            (1_0000, 7000, 3000, 900, 
+            600, 300, 90, 50);
+
+        (_tirePortion[0], _tirePortion[0], _tirePortion[0], _tirePortion[0], 
+         _tirePortion[0], _tirePortion[0], _tirePortion[0], _tirePortion[0]) = 
+            (30_00, 23_00, 15_00, 11_00,
+             8_00, 6_00, 4_50, 2_50);        
     }
 
     /********************************** GENERIC VIEW FUNCTIONs **********************************/
@@ -34,6 +44,7 @@ contract Reflect is ReflectTireIndex, ReflectAirdrop {
         (uint256 balance, ) = _balanceWithRewards(account);
         return balance;
     }
+
     function balanceOfWithUpdate(address account) public override returns (uint256) {
         (uint256 balance, bool requireUpdate) = _balanceWithRewards(account);
 
@@ -105,9 +116,9 @@ contract Reflect is ReflectTireIndex, ReflectAirdrop {
                     uint256 shareRatio = nominator / denominator;
 
                     rewardShare = tirePool * shareRatio / 10_000;
-                }
 
-                resultBalance += rewardShare;
+                    resultBalance += rewardShare;
+                }
             }
         }
 

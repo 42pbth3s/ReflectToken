@@ -80,6 +80,15 @@ abstract contract ReflectErc20Core is Ownable2Step, IERC20, IERC20Metadata, IERC
     }
 
     
+    function LastShadowIndexedTire() public view returns(uint8) {
+        return ~_lastShadowIndexedTireInvert;
+    }
+
+    function LastShadowIndexedChunk() public view returns(uint16) {
+        return ~_lastShadowIndexedChunkInvert;
+    }
+    
+    
     function approve(address spender, uint256 value) public virtual returns (bool) {
         _approve(msg.sender, spender, value);
         return true;
