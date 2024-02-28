@@ -1164,7 +1164,578 @@ contract CounterTest is Test {
 
 
     function testTransferRetireing() public {
+        _airDropTireingState memory lState;
+
+        lState.users = new address[](19);
+        lState.sizes = new uint256[](lState.users.length);
+        lState.tires = new uint8[](lState.users.length - 1);
+
+        lState.totalAirdrop = 10_000_000 * 1e18;
+
+        for (uint256 i = 0; i < lState.users.length; i++) {
+            lState.users[i] = _allocateBurner();
+        }
+
+        //           100_0000
+        lState.sizes[0] =    (1_5000 * lState.totalAirdrop) / 100_0000;
+        lState.sizes[1] =    (1_0000 * lState.totalAirdrop) / 100_0000;
+        lState.tires[0] = 0;
+        lState.tires[1] = 0;
+
+        lState.sizes[2] =    (  8000 * lState.totalAirdrop) / 100_0000;
+        lState.sizes[3] =    (  7000 * lState.totalAirdrop) / 100_0000;
+        lState.tires[2] = 1;
+        lState.tires[3] = 1;
         
+        lState.sizes[4] =    (  4000 * lState.totalAirdrop) / 100_0000;
+        lState.sizes[5] =    (  3000 * lState.totalAirdrop) / 100_0000;
+        lState.tires[4] = 2;
+        lState.tires[5] = 2;
+        
+        lState.sizes[6] =    (  1000 * lState.totalAirdrop) / 100_0000;
+        lState.sizes[7] =    (   900 * lState.totalAirdrop) / 100_0000;
+        lState.tires[6] = 3;
+        lState.tires[7] = 3;
+    
+        lState.sizes[8] =    (   700 * lState.totalAirdrop) / 100_0000;
+        lState.sizes[9] =    (   600 * lState.totalAirdrop) / 100_0000;
+        lState.tires[8] = 4;
+        lState.tires[9] = 4;
+        
+        lState.sizes[10] =   (   400 * lState.totalAirdrop) / 100_0000;
+        lState.sizes[11] =   (   300 * lState.totalAirdrop) / 100_0000;
+        lState.tires[10] = 5;
+        lState.tires[11] = 5;
+        
+        lState.sizes[12] =   (   100 * lState.totalAirdrop) / 100_0000;
+        lState.sizes[13] =   (    90 * lState.totalAirdrop) / 100_0000;
+        lState.tires[12] = 6;
+        lState.tires[13] = 6;
+        
+        lState.sizes[14] =   (    60 * lState.totalAirdrop) / 100_0000;
+        lState.sizes[15] =   (    50 * lState.totalAirdrop) / 100_0000;
+        lState.tires[14] = 7;
+        lState.tires[15] = 7;
+        
+        lState.sizes[16] =   (    40 * lState.totalAirdrop) / 100_0000;
+        lState.sizes[17] =   (    30 * lState.totalAirdrop) / 100_0000;
+        lState.tires[16] = type(uint8).max;
+        lState.tires[17] = type(uint8).max;
+
+        lState.sizes[18] = lState.totalAirdrop;
+
+        for (uint256 i = 0; i < (lState.sizes.length - 1); i++) {
+            lState.sizes[18] -= lState.sizes[i];
+        }
+
+        lState.tree = _generateAirdropMerkleTree(lState.users, lState.sizes);
+        lState.root = lState.tree.flatTree[lState.tree.flatTree.length - 1];
+
+
+        vm.startPrank(Owner);
+        TokenContract.PrepareAirdrop(lState.root, lState.totalAirdrop, 20_000);
+        TokenContract.IndexShadow(20_000);
+        TokenContract.LaunchAirdrop();
+        vm.stopPrank();
+
+        for (uint256 i = 0; i < (lState.users.length - 1); i++) {
+            console.log("User: %d", i);
+
+            bytes32[] memory proof = _extractMerkleProof(lState.tree, i);
+
+            vm.startPrank(lState.users[i]);
+            TokenContract.Airdrop(lState.root, proof, lState.sizes[i]);
+            vm.stopPrank();
+
+            _printWalletBalance(lState.users[i]);
+
+            AccountState memory accountInfo = TokenContract.AccountData(lState.users[i]);
+            uint256 currentMintIndex = TokenContract.ActiveMintIndex();
+        
+            uint8 mintIndexTire = ~accountInfo.tirePoitnters[currentMintIndex % 2].tireIdInvert;
+            uint16 mintIndexChunk = ~accountInfo.tirePoitnters[currentMintIndex % 2].chunkIdInvert;
+
+            console.log("User tire: %d ; chunk: %d", mintIndexTire, mintIndexChunk);
+
+            assertEq(lState.tires[i], mintIndexTire, "user tire");
+            if (lState.tires[i] != type(uint8).max)
+                assertEq(0, mintIndexChunk, "user chunk");
+            else
+                assertEq(type(uint16).max, mintIndexChunk, "user chunk 2");
+
+            //No shadows at first mint
+
+            assertEq(0, accountInfo.tirePoitnters[(currentMintIndex + 1) % 2].tireIdInvert, "shadow index tire");
+            assertEq(0, accountInfo.tirePoitnters[(currentMintIndex + 1) % 2].chunkIdInvert, "shadow index chunk");
+            assertEq(0, accountInfo.tirePoitnters[(currentMintIndex + 1) % 2].indexId, "shadow index id");
+
+            
+            if (lState.tires[i] != type(uint8).max) {
+                console.log(" Tire contents");
+
+                (uint32 regularLength, uint32 highLength, uint32 chunksCount) = TokenContract.GetTireData(currentMintIndex, lState.tires[i]);
+
+                
+                assertEq(1 + (i & 1), regularLength, "tire reg memb");
+                assertEq(0, highLength, "tire high rewardmemb");
+                assertEq(1, chunksCount, "tire chunks");
+
+
+                console.log(" Chunk contents");
+                (uint8 chunkLen, address[CHUNK_SIZE] memory chunkList) = TokenContract.GetTireChunk(currentMintIndex, lState.tires[i], 0);
+
+                
+                assertEq(1 + (i & 1), chunkLen, "chunk length");
+                assertEq(lState.users[i], chunkList[i & 1], "chunk list entry");
+            }
+            console.log("++++++++++++++++++++++++ NEXT USER ++++++++++++++++++++++++++");
+        }
+
+        address wasteWallet = _allocateBurner();
+        
+        console.log("Transfer some tokens & test reteiring. 1st move to tire 7");
+        vm.startPrank(lState.users[0]);
+        TokenContract.transfer(wasteWallet, lState.sizes[0] - lState.sizes[15]); // -> moving to tire7
+        vm.stopPrank();
+
+        {
+            AccountState memory accountInfo = TokenContract.AccountData(lState.users[0]);
+            uint256 currentMintIndex = TokenContract.ActiveMintIndex();
+
+
+            uint8 mintIndexTire = ~accountInfo.tirePoitnters[currentMintIndex % 2].tireIdInvert;
+            uint16 mintIndexChunk = ~accountInfo.tirePoitnters[currentMintIndex % 2].chunkIdInvert;
+
+            console.log("User 0 tire: %d ; chunk: %d", mintIndexTire, mintIndexChunk);
+
+            assertEq(7, mintIndexTire, "user tire");
+            assertEq(0, mintIndexChunk, "user chunk");
+
+            console.log(" Tire contents");
+
+            (uint32 regularLength, uint32 highLength, uint32 chunksCount) = TokenContract.GetTireData(currentMintIndex, 7);
+
+            
+            assertEq(3, regularLength, "tire reg memb");
+            assertEq(0, highLength, "tire high rewardmemb");
+            assertEq(1, chunksCount, "tire chunks");
+
+
+            console.log(" Chunk contents");
+            (uint8 chunkLen, address[CHUNK_SIZE] memory chunkList) = TokenContract.GetTireChunk(currentMintIndex, 7, 0);
+
+            
+            assertEq(3, chunkLen, "chunk length");
+            assertEq(lState.users[0], chunkList[2], "chunk list entry");
+        }
+
+        {
+            AccountState memory accountInfo = TokenContract.AccountData(wasteWallet);
+            uint256 currentMintIndex = TokenContract.ActiveMintIndex();
+
+
+            uint8 mintIndexTire = ~accountInfo.tirePoitnters[currentMintIndex % 2].tireIdInvert;
+            uint16 mintIndexChunk = ~accountInfo.tirePoitnters[currentMintIndex % 2].chunkIdInvert;
+
+            console.log("User waste tire: %d ; chunk: %d", mintIndexTire, mintIndexChunk);
+
+            assertEq(0, mintIndexTire, "user tire");
+            assertEq(0, mintIndexChunk, "user chunk");
+
+            console.log(" Tire contents");
+
+            (uint32 regularLength, uint32 highLength, uint32 chunksCount) = TokenContract.GetTireData(currentMintIndex, 0);
+
+            
+            assertEq(2, regularLength, "tire reg memb");
+            assertEq(0, highLength, "tire high rewardmemb");
+            assertEq(1, chunksCount, "tire chunks");
+
+
+            console.log(" Chunk contents");
+            (uint8 chunkLen, address[CHUNK_SIZE] memory chunkList) = TokenContract.GetTireChunk(currentMintIndex, 0, 0);
+
+            
+            assertEq(2, chunkLen, "chunk length");
+            assertEq(lState.users[1], chunkList[0], "chunk list entry 1");
+            assertEq(wasteWallet, chunkList[1], "chunk list entry 2");
+        }
+
+        console.log("move outside tires");
+        vm.startPrank(lState.users[0]);
+        TokenContract.transfer(wasteWallet, lState.sizes[15] - lState.sizes[16]); // -> moving out from index
+        vm.stopPrank();
+
+        {
+            AccountState memory accountInfo = TokenContract.AccountData(lState.users[0]);
+            uint256 currentMintIndex = TokenContract.ActiveMintIndex();
+
+
+            uint8 mintIndexTire = ~accountInfo.tirePoitnters[currentMintIndex % 2].tireIdInvert;
+            uint16 mintIndexChunk = ~accountInfo.tirePoitnters[currentMintIndex % 2].chunkIdInvert;
+
+            console.log("User 0 tire: %d ; chunk: %d", mintIndexTire, mintIndexChunk);
+
+            assertEq(type(uint8).max, mintIndexTire, "user tire");
+            assertEq(type(uint16).max, mintIndexChunk, "user chunk");
+
+            console.log(" Tire contents");
+
+            (uint32 regularLength, uint32 highLength, uint32 chunksCount) = TokenContract.GetTireData(currentMintIndex, 7);
+
+            
+            assertEq(2, regularLength, "tire reg memb");
+            assertEq(0, highLength, "tire high rewardmemb");
+            assertEq(1, chunksCount, "tire chunks");
+
+
+            console.log(" Chunk contents");
+            (uint8 chunkLen, address[CHUNK_SIZE] memory chunkList) = TokenContract.GetTireChunk(currentMintIndex, 7, 0);
+
+            
+            assertEq(2, chunkLen, "chunk length");
+            assertEq(lState.users[14], chunkList[0], "chunk list entry");
+            assertEq(lState.users[15], chunkList[1], "chunk list entry");
+        }
+    }
+
+
+    function testTransferShadowRetireing() public {
+        _airDropTireingState memory lState;
+
+        lState.users = new address[](19);
+        lState.sizes = new uint256[](lState.users.length);
+        lState.tires = new uint8[](lState.users.length - 1);
+
+        lState.totalAirdrop = 10_000_000 * 1e18;
+
+        for (uint256 i = 0; i < lState.users.length; i++) {
+            lState.users[i] = _allocateBurner();
+        }
+
+        //           100_0000
+        lState.sizes[0] =    (1_5000 * lState.totalAirdrop) / 100_0000;
+        lState.sizes[1] =    (1_0000 * lState.totalAirdrop) / 100_0000;
+        lState.tires[0] = 0;
+        lState.tires[1] = 0;
+
+        lState.sizes[2] =    (  8000 * lState.totalAirdrop) / 100_0000;
+        lState.sizes[3] =    (  7000 * lState.totalAirdrop) / 100_0000;
+        lState.tires[2] = 1;
+        lState.tires[3] = 1;
+        
+        lState.sizes[4] =    (  4000 * lState.totalAirdrop) / 100_0000;
+        lState.sizes[5] =    (  3000 * lState.totalAirdrop) / 100_0000;
+        lState.tires[4] = 2;
+        lState.tires[5] = 2;
+        
+        lState.sizes[6] =    (  1000 * lState.totalAirdrop) / 100_0000;
+        lState.sizes[7] =    (   900 * lState.totalAirdrop) / 100_0000;
+        lState.tires[6] = 3;
+        lState.tires[7] = 3;
+    
+        lState.sizes[8] =    (   700 * lState.totalAirdrop) / 100_0000;
+        lState.sizes[9] =    (   600 * lState.totalAirdrop) / 100_0000;
+        lState.tires[8] = 4;
+        lState.tires[9] = 4;
+        
+        lState.sizes[10] =   (   400 * lState.totalAirdrop) / 100_0000;
+        lState.sizes[11] =   (   300 * lState.totalAirdrop) / 100_0000;
+        lState.tires[10] = 5;
+        lState.tires[11] = 5;
+        
+        lState.sizes[12] =   (   100 * lState.totalAirdrop) / 100_0000;
+        lState.sizes[13] =   (    90 * lState.totalAirdrop) / 100_0000;
+        lState.tires[12] = 6;
+        lState.tires[13] = 6;
+        
+        lState.sizes[14] =   (    60 * lState.totalAirdrop) / 100_0000;
+        lState.sizes[15] =   (    50 * lState.totalAirdrop) / 100_0000;
+        lState.tires[14] = 7;
+        lState.tires[15] = 7;
+        
+        lState.sizes[16] =   (    40 * lState.totalAirdrop) / 100_0000;
+        lState.sizes[17] =   (    30 * lState.totalAirdrop) / 100_0000;
+        lState.tires[16] = type(uint8).max;
+        lState.tires[17] = type(uint8).max;
+
+        lState.sizes[18] = lState.totalAirdrop;
+
+        for (uint256 i = 0; i < (lState.sizes.length - 1); i++) {
+            lState.sizes[18] -= lState.sizes[i];
+        }
+
+        lState.tree = _generateAirdropMerkleTree(lState.users, lState.sizes);
+        lState.root = lState.tree.flatTree[lState.tree.flatTree.length - 1];
+
+
+        vm.startPrank(Owner);
+        TokenContract.PrepareAirdrop(lState.root, lState.totalAirdrop, 20_000);
+        TokenContract.IndexShadow(20_000);
+        TokenContract.LaunchAirdrop();
+        vm.stopPrank();
+
+        for (uint256 i = 0; i < (lState.users.length - 1); i++) {
+            console.log("User: %d", i);
+
+            bytes32[] memory proof = _extractMerkleProof(lState.tree, i);
+
+            vm.startPrank(lState.users[i]);
+            TokenContract.Airdrop(lState.root, proof, lState.sizes[i]);
+            vm.stopPrank();
+
+            _printWalletBalance(lState.users[i]);
+
+            AccountState memory accountInfo = TokenContract.AccountData(lState.users[i]);
+            uint256 currentMintIndex = TokenContract.ActiveMintIndex();
+        
+            uint8 mintIndexTire = ~accountInfo.tirePoitnters[currentMintIndex % 2].tireIdInvert;
+            uint16 mintIndexChunk = ~accountInfo.tirePoitnters[currentMintIndex % 2].chunkIdInvert;
+
+            console.log("User tire: %d ; chunk: %d", mintIndexTire, mintIndexChunk);
+
+            assertEq(lState.tires[i], mintIndexTire, "user tire");
+            if (lState.tires[i] != type(uint8).max)
+                assertEq(0, mintIndexChunk, "user chunk");
+            else
+                assertEq(type(uint16).max, mintIndexChunk, "user chunk 2");
+
+            //No shadows at first mint
+
+            assertEq(0, accountInfo.tirePoitnters[(currentMintIndex + 1) % 2].tireIdInvert, "shadow index tire");
+            assertEq(0, accountInfo.tirePoitnters[(currentMintIndex + 1) % 2].chunkIdInvert, "shadow index chunk");
+            assertEq(0, accountInfo.tirePoitnters[(currentMintIndex + 1) % 2].indexId, "shadow index id");
+
+            
+            if (lState.tires[i] != type(uint8).max) {
+                console.log(" Tire contents");
+
+                (uint32 regularLength, uint32 highLength, uint32 chunksCount) = TokenContract.GetTireData(currentMintIndex, lState.tires[i]);
+
+                
+                assertEq(1 + (i & 1), regularLength, "tire reg memb");
+                assertEq(0, highLength, "tire high rewardmemb");
+                assertEq(1, chunksCount, "tire chunks");
+
+
+                console.log(" Chunk contents");
+                (uint8 chunkLen, address[CHUNK_SIZE] memory chunkList) = TokenContract.GetTireChunk(currentMintIndex, lState.tires[i], 0);
+
+                
+                assertEq(1 + (i & 1), chunkLen, "chunk length");
+                assertEq(lState.users[i], chunkList[i & 1], "chunk list entry");
+            }
+            console.log("++++++++++++++++++++++++ NEXT USER ++++++++++++++++++++++++++");
+        }
+
+        {
+            // Do not complete operation
+            // to sanity check shadow index
+            vm.startPrank(Owner);
+            TokenContract.PrepareAirdrop(bytes32(uint256(1)), 1, 20_000);
+            TokenContract.IndexShadow(20_000);
+            vm.stopPrank();
+        }
+
+
+        address wasteWallet = _allocateBurner();
+        
+        console.log("Transfer some tokens & test reteiring. 1st move to tire 7");
+        vm.startPrank(lState.users[0]);
+        TokenContract.transfer(wasteWallet, lState.sizes[0] - lState.sizes[14]); // -> moving to tire7
+        vm.stopPrank();
+
+        { //main
+            AccountState memory accountInfo = TokenContract.AccountData(lState.users[0]);
+            uint256 currentMintIndex = TokenContract.ActiveMintIndex();
+
+
+            uint8 mintIndexTire = ~accountInfo.tirePoitnters[currentMintIndex % 2].tireIdInvert;
+            uint16 mintIndexChunk = ~accountInfo.tirePoitnters[currentMintIndex % 2].chunkIdInvert;
+
+            console.log("User 0 tire: %d ; chunk: %d", mintIndexTire, mintIndexChunk);
+
+            assertEq(7, mintIndexTire, "user tire");
+            assertEq(0, mintIndexChunk, "user chunk");
+
+            console.log(" Tire contents");
+
+            (uint32 regularLength, uint32 highLength, uint32 chunksCount) = TokenContract.GetTireData(currentMintIndex, 7);
+
+            
+            assertEq(3, regularLength, "tire reg memb");
+            assertEq(0, highLength, "tire high rewardmemb");
+            assertEq(1, chunksCount, "tire chunks");
+
+
+            console.log(" Chunk contents");
+            (uint8 chunkLen, address[CHUNK_SIZE] memory chunkList) = TokenContract.GetTireChunk(currentMintIndex, 7, 0);
+
+            
+            assertEq(3, chunkLen, "chunk length");
+            assertEq(lState.users[0], chunkList[2], "chunk list entry");
+        }
+        { //shadow
+            AccountState memory accountInfo = TokenContract.AccountData(lState.users[0]);
+            uint256 currentMintIndex = TokenContract.ActiveMintIndex();
+
+
+            uint8 shadowIndexTire = ~accountInfo.tirePoitnters[(currentMintIndex + 1) % 2].tireIdInvert;
+            uint16 shadowIndexChunk = ~accountInfo.tirePoitnters[(currentMintIndex + 1) % 2].chunkIdInvert;
+
+            console.log("User 0 shadow tire: %d ; shadow chunk: %d", shadowIndexTire, shadowIndexChunk);
+
+            assertEq(7, shadowIndexTire, "user shadow tire");
+            assertEq(0, shadowIndexChunk, "user shadow chunk");
+
+            console.log(" Tire contents");
+
+            (uint32 regularLength, uint32 highLength, uint32 chunksCount) = TokenContract.GetTireData(currentMintIndex + 1, 7);
+
+            
+            assertEq(3, regularLength, "shadow tire reg memb");
+            assertEq(0, highLength, "shadow tire high rewardmemb");
+            assertEq(1, chunksCount, "shadow tire chunks");
+
+
+            console.log(" Chunk contents");
+            (uint8 chunkLen, address[CHUNK_SIZE] memory chunkList) = TokenContract.GetTireChunk(currentMintIndex + 1, 7, 0);
+
+            
+            assertEq(3, chunkLen, "shadow chunk length");
+            assertEq(lState.users[0], chunkList[2], "shadow chunk list entry");
+        }
+
+        { //main
+            AccountState memory accountInfo = TokenContract.AccountData(wasteWallet);
+            uint256 currentMintIndex = TokenContract.ActiveMintIndex();
+
+
+            uint8 mintIndexTire = ~accountInfo.tirePoitnters[currentMintIndex % 2].tireIdInvert;
+            uint16 mintIndexChunk = ~accountInfo.tirePoitnters[currentMintIndex % 2].chunkIdInvert;
+
+            console.log("User waste tire: %d ; chunk: %d", mintIndexTire, mintIndexChunk);
+
+            assertEq(0, mintIndexTire, "user tire");
+            assertEq(0, mintIndexChunk, "user chunk");
+
+            console.log(" Tire contents");
+
+            (uint32 regularLength, uint32 highLength, uint32 chunksCount) = TokenContract.GetTireData(currentMintIndex, 0);
+
+            
+            assertEq(2, regularLength, "tire reg memb");
+            assertEq(0, highLength, "tire high rewardmemb");
+            assertEq(1, chunksCount, "tire chunks");
+
+
+            console.log(" Chunk contents");
+            (uint8 chunkLen, address[CHUNK_SIZE] memory chunkList) = TokenContract.GetTireChunk(currentMintIndex, 0, 0);
+
+            
+            assertEq(2, chunkLen, "chunk length");
+            assertEq(lState.users[1], chunkList[0], "chunk list entry 1");
+            assertEq(wasteWallet, chunkList[1], "chunk list entry 2");
+        }
+        { //shadow
+            AccountState memory accountInfo = TokenContract.AccountData(wasteWallet);
+            uint256 currentMintIndex = TokenContract.ActiveMintIndex();
+
+
+            uint8 shadowIndexTire = ~accountInfo.tirePoitnters[(currentMintIndex + 1) % 2].tireIdInvert;
+            uint16 shadowIndexChunk = ~accountInfo.tirePoitnters[(currentMintIndex + 1) % 2].chunkIdInvert;
+
+            console.log("User waste shadow tire: %d ; shadow chunk: %d", shadowIndexTire, shadowIndexChunk);
+
+            assertEq(0, shadowIndexTire, "user shadow tire");
+            assertEq(0, shadowIndexChunk, "user shadow chunk");
+
+            console.log(" Tire contents");
+
+            (uint32 regularLength, uint32 highLength, uint32 chunksCount) = TokenContract.GetTireData(currentMintIndex + 1, 0);
+
+            
+            assertEq(1, regularLength, "shadow tire reg memb");
+            assertEq(0, highLength, "shadow tire high rewardmemb");
+            assertEq(1, chunksCount, "shadow tire chunks");
+
+
+            console.log(" Chunk contents");
+            (uint8 chunkLen, address[CHUNK_SIZE] memory chunkList) = TokenContract.GetTireChunk(currentMintIndex + 1, 0, 0);
+
+            
+            assertEq(1, chunkLen, "shadow chunk length");
+            //assertEq(lState.users[1], chunkList[0], "shadow chunk list entry 1");
+            assertEq(wasteWallet, chunkList[0], "shadow chunk list entry 2");
+        }
+
+        console.log("move outside tires");
+        vm.startPrank(lState.users[0]);
+        TokenContract.transfer(wasteWallet, lState.sizes[14] - lState.sizes[16]); // -> moving out from index
+        vm.stopPrank();
+
+        { //main
+            AccountState memory accountInfo = TokenContract.AccountData(lState.users[0]);
+            uint256 currentMintIndex = TokenContract.ActiveMintIndex();
+
+
+            uint8 mintIndexTire = ~accountInfo.tirePoitnters[currentMintIndex % 2].tireIdInvert;
+            uint16 mintIndexChunk = ~accountInfo.tirePoitnters[currentMintIndex % 2].chunkIdInvert;
+
+            console.log("User 0 tire: %d ; chunk: %d", mintIndexTire, mintIndexChunk);
+
+            assertEq(type(uint8).max, mintIndexTire, "user tire");
+            assertEq(type(uint16).max, mintIndexChunk, "user chunk");
+
+            console.log(" Tire contents");
+
+            (uint32 regularLength, uint32 highLength, uint32 chunksCount) = TokenContract.GetTireData(currentMintIndex, 7);
+
+            
+            assertEq(2, regularLength, "tire reg memb");
+            assertEq(0, highLength, "tire high rewardmemb");
+            assertEq(1, chunksCount, "tire chunks");
+
+
+            console.log(" Chunk contents");
+            (uint8 chunkLen, address[CHUNK_SIZE] memory chunkList) = TokenContract.GetTireChunk(currentMintIndex, 7, 0);
+
+            
+            assertEq(2, chunkLen, "chunk length");
+            assertEq(lState.users[14], chunkList[0], "chunk list entry");
+            assertEq(lState.users[15], chunkList[1], "chunk list entry");
+        }
+        { //shadow
+            AccountState memory accountInfo = TokenContract.AccountData(lState.users[0]);
+            uint256 currentMintIndex = TokenContract.ActiveMintIndex();
+
+
+            uint8 shadowIndexTire = ~accountInfo.tirePoitnters[(currentMintIndex + 1) % 2].tireIdInvert;
+            uint16 shadowIndexChunk = ~accountInfo.tirePoitnters[(currentMintIndex + 1) % 2].chunkIdInvert;
+
+            console.log("User 0 shadow tire: %d ; shadow chunk: %d", shadowIndexTire, shadowIndexChunk);
+
+            assertEq(type(uint8).max, shadowIndexTire, "user shadow tire");
+            assertEq(type(uint16).max, shadowIndexChunk, "user shadow chunk");
+
+            console.log(" Tire contents");
+
+            (uint32 regularLength, uint32 highLength, uint32 chunksCount) = TokenContract.GetTireData(currentMintIndex + 1, 7);
+
+            
+            assertEq(2, regularLength, "shadow tire reg memb");
+            assertEq(0, highLength, "shadow tire high rewardmemb");
+            assertEq(1, chunksCount, "shadow tire chunks");
+
+
+            console.log(" Chunk contents");
+            (uint8 chunkLen, address[CHUNK_SIZE] memory chunkList) = TokenContract.GetTireChunk(currentMintIndex + 1, 7, 0);
+
+            
+            assertEq(2, chunkLen, "shadow chunk length");
+            assertEq(lState.users[13], chunkList[0], "chunk list entry");
+            assertEq(lState.users[14], chunkList[1], "chunk list entry");
+        }
     }
 
 
@@ -1173,5 +1744,6 @@ contract CounterTest is Test {
 
     }
     //TODO: shadow index tests
+    //TODO: Locked & available tests
 
 }

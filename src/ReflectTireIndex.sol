@@ -142,18 +142,21 @@ abstract contract ReflectTireIndex is ReflectErc20Core {
 
 
         //Shall happen on very rare ocasions
-        //if were not into index before - there is now way that we will occur in shadow
-        if ((lState.mainIndex.oldTierId != type(uint8).max) && _shadowMintIndexEnabled()) {
+        if (_shadowMintIndexEnabled()) {
             uint8 lastShadowIndexedTire = ~_lastShadowIndexedTireInvert;
             uint16 lastShadowIndexedChunk = ~_lastShadowIndexedChunkInvert;
 
-            //only if was indexed into shadow - we need to go into it again
+            //only if was indexed into shadow
+            //   (indexing may happen acrros multiple txs) - we need to go into it again
             if (
+                // in cases if we are/were present in main index
                 (lState.mainIndex.oldTierId < lastShadowIndexedTire) ||
                 (
                     (lState.mainIndex.oldTierId == lastShadowIndexedTire) && 
                     (lState.mainIndex.oldChunkId < lastShadowIndexedChunk)
-                )
+                ) ||
+                // in cases if we are just added in main index
+                (lState.mainIndex.newTire < lastShadowIndexedTire)
             ) {
                 uint24 shadowMintIndex = ActiveMintIndex + 1;
                 MintIndex storage shadowMIndex = MintIndexes[shadowMintIndex];
@@ -163,22 +166,26 @@ abstract contract ReflectTireIndex is ReflectErc20Core {
                 (lState.shadowIndex.newTire, shadowTireFound) = _getIndexTireByBalance(balance, shadowMIndex.totalSupply);
 
                 if (shadowTireFound) {
-                    if (lState.shadowIndex.oldTierId != lState.shadowIndex.newTire) 
-                    {
-                        {   
-                            uint24 accountShadowMintIndex;                     
-                            (accountShadowMintIndex, lState.shadowIndex.oldTierId) = 
-                                (accountShadowTireIdx.indexId, uint256(~accountShadowTireIdx.tireIdInvert));
-                            
-                            if (shadowMintIndex == accountShadowMintIndex) { //make sure that we're indexed
-                                if (lState.shadowIndex.oldTierId != type(uint8).max) {                            
-                                    lState.shadowIndex.oldChunkId = uint256(~accountShadowTireIdx.chunkIdInvert);
+                    uint24 accountShadowMintIndex;                     
+                    (accountShadowMintIndex, lState.shadowIndex.oldTierId) = 
+                        (accountShadowTireIdx.indexId, uint256(~accountShadowTireIdx.tireIdInvert));
 
-                                    _dropAccountFromMintIndex(shadowMIndex, wallet, uint8(lState.shadowIndex.oldTierId), lState.shadowIndex.oldChunkId);
-                                }
-                            }
+                    // only if change in tires or index outdated
+                    if (
+                        (lState.shadowIndex.oldTierId != lState.shadowIndex.newTire)  ||
+                        (shadowMintIndex != accountShadowMintIndex)
+                    ) {
+                        //make sure that we're up to date, otherwise we can't drop nothing
+                        // and we had been in index before
+                        if (
+                            (shadowMintIndex == accountShadowMintIndex) &&
+                            (lState.shadowIndex.oldTierId != type(uint8).max)
+                        ) {                            
+                            lState.shadowIndex.oldChunkId = uint256(~accountShadowTireIdx.chunkIdInvert);
+
+                            _dropAccountFromMintIndex(shadowMIndex, wallet, uint8(lState.shadowIndex.oldTierId), lState.shadowIndex.oldChunkId);
                         }
-
+                        
                         uint256 shadowChunkId = _appendAccountToMintIndex(shadowMIndex, lState.shadowIndex.newTire, wallet);
 
                         
@@ -188,7 +195,7 @@ abstract contract ReflectTireIndex is ReflectErc20Core {
                 } else if (
                         (accountShadowTireIdx.tireIdInvert != 0) &&
                         (shadowMintIndex == accountShadowTireIdx.indexId) //make sure that we're indexed
-                    ) { 
+                ) { 
                     uint256 oldShadowTierId = uint256(~accountShadowTireIdx.tireIdInvert);
                     uint256 oldShadowChunkId = uint256(~accountShadowTireIdx.chunkIdInvert);
 
