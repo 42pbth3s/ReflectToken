@@ -232,7 +232,7 @@ contract Reflect is ReflectTireIndex, ReflectAirdrop {
         TaxAuth1Share = share1;
     }
 
-     function UpdateTaxAuthorities(address taxAuth1, address taxAuth2) public onlyOwner {
+    function UpdateTaxAuthorities(address taxAuth1, address taxAuth2) public onlyOwner {
         address oldAuth1 = TaxAuthoriy1;
         address oldAuth2 = TaxAuthoriy2;
 
