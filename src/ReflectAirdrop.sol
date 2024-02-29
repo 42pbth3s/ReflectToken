@@ -60,7 +60,7 @@ abstract contract ReflectAirdrop is ReflectTireIndex {
         uint256 shadowMintIndex = activeMintIndex + 1;
         uint256 shadowTotalSupply = MintIndexes[shadowMintIndex].totalSupply;
 
-        for (; (tire < FEE_TIRES) && (gasleft() > gasLimit); tire++) {
+        for (; (tire < FEE_TIRES) && (gasleft() > gasLimit);) {
             uint32 tireChunksCount = MintIndexes[activeMintIndex].tires[tire].chunksCount;
 
             for (; (chunkId < tireChunksCount) && (gasleft() > gasLimit); chunkId++) {
@@ -91,6 +91,7 @@ abstract contract ReflectAirdrop is ReflectTireIndex {
 
             if (chunkId == tireChunksCount) {
                 chunkId = 0;
+                tire++;
             }
         }
 
