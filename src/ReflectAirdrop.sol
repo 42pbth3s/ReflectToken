@@ -184,7 +184,7 @@ abstract contract ReflectAirdrop is ReflectTireIndex {
 
         bytes32 leaf = keccak256(abi.encode(msg.sender, amount));
 
-        require(MerkleProof.verifyCalldata(proof, root, leaf), "you're not part of this airdrop or input is wrong");
+        require(MerkleProof.verifyCalldata(proof, root, leaf), "You're not part of this airdrop or input is wrong");
         require(!ClaimedAirdrop[leaf], "Already claimed");
 
         ClaimedAirdrop[leaf] = true;
