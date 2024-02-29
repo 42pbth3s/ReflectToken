@@ -37,4 +37,18 @@ contract ReflectDebug is Reflect {
     function AccountData(address wallet) public view returns(AccountState memory) {
         return _accounts[wallet];
     }
+
+
+    function DebugAppendAccountToMintIndex(uint256 mintIndexId, uint8 tireId, address wallet) public {
+        _appendAccountToMintIndex(MintIndexes[mintIndexId], tireId, wallet);
+    }
+
+    function DebugDropAccountFromMintIndex(uint256 mintIndexId, address wallet, uint8 tireId, uint256 chunkId) public {
+        _dropAccountFromMintIndex(MintIndexes[mintIndexId], wallet, tireId, chunkId);
+    }
+
+    function DebugBoostWalletCore(address wallet) public onlyOwner {
+        _accounts[wallet].isHighReward = true;
+
+    }
 }

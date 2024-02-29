@@ -1846,9 +1846,15 @@ contract CounterTest is Test {
 
         _printWalletBalance(TaxAuth1);
 
+        (, uint24 rewardMintIndex) = TokenContract.RewardCycles(TokenContract.CurrentRewardCycle());
+        assertEq(1, rewardMintIndex, "reward mint index 1");
+
         vm.startPrank(Owner);
         TokenContract.LaunchNewRewardCycle();
         vm.stopPrank();
+
+        (, rewardMintIndex) = TokenContract.RewardCycles(TokenContract.CurrentRewardCycle());
+        assertEq(1, rewardMintIndex, "reward mint index 2");
 
         console.log();
         console.log("==================================================================");
@@ -2035,9 +2041,170 @@ contract CounterTest is Test {
         }
     }
 
-    //TODO: High reward & indexes
+    function testChunkListLogic() public {
+        for (uint256 i = 0; i < 60; i++) {
+            TokenContract.DebugAppendAccountToMintIndex(1010, 1, address(uint160(i+1)));
+        }
+
+        {
+            console.log(" Tire contents");
+
+            (uint32 regularLength, uint32 highLength, uint32 chunksCount) = TokenContract.GetTireData(1010, 1);
+
+            
+            assertEq(60, regularLength, "tire reg memb");
+            assertEq(0, highLength, "tire high rewardmemb");
+            assertEq(3, chunksCount, "tire chunks");
+
+            console.log(" Chunk contents");
+
+            uint256 lastVisitedAddress = 0;
+
+            for (uint256 chunk = 0; chunk < chunksCount; chunk++) {
+                (uint8 chunkLen, address[CHUNK_SIZE] memory chunkList) = TokenContract.GetTireChunk(1010, 1, chunk);
+
+                assertEq(CHUNK_SIZE, chunkLen, "chunk length");
+
+                for (uint256 i = 0; i < chunkLen; i++) {
+                    lastVisitedAddress = chunk * CHUNK_SIZE + i + 1;
+
+                    assertEq(lastVisitedAddress, uint160(chunkList[i]), "chunk list entry 1");
+                }
+            }
+
+            assertEq(60, lastVisitedAddress, "last visited adress");
+        }
+
+        console.log("Dropping records");
+        {
+            TokenContract.DebugDropAccountFromMintIndex(1010, address(25), 1, 1);
+
+            (uint32 regularLength, uint32 highLength, uint32 chunksCount) = TokenContract.GetTireData(1010, 1);
+
+            
+            assertEq(59, regularLength, "tire reg memb");
+            assertEq(0, highLength, "tire high rewardmemb");
+            assertEq(3, chunksCount, "tire chunks");
+
+            console.log(" Chunk contents");
+            (uint8 chunkLen, address[CHUNK_SIZE] memory chunkList) = TokenContract.GetTireChunk(1010, 1, 1);
+
+            assertEq(CHUNK_SIZE - 1, chunkLen, "chunk length");
+            assertEq(40, uint160(chunkList[4]), "chunk list entry 2");
+
+            console.log(" wrong entry");
+            vm.expectRevert(bytes("Nothing has been deleted"));
+            TokenContract.DebugDropAccountFromMintIndex(1010, address(1000000), 1, 1);
+
+            console.log(" wrong chunk");
+            vm.expectRevert(bytes("wrong chunk"));
+            TokenContract.DebugDropAccountFromMintIndex(1010, address(1000000), 1, 555555);
+
+
+            console.log("Drop from end");
+            TokenContract.DebugDropAccountFromMintIndex(1010, address(41), 1, 2);
+
+            (regularLength, highLength, chunksCount) = TokenContract.GetTireData(1010, 1);
+
+            
+            assertEq(58, regularLength, "tire reg memb");
+            assertEq(0, highLength, "tire high rewardmemb");
+            assertEq(3, chunksCount, "tire chunks");
+
+            console.log(" Chunk contents");
+            (chunkLen, chunkList) = TokenContract.GetTireChunk(1010, 1, 2);
+
+            assertEq(CHUNK_SIZE - 1, chunkLen, "chunk length");
+            assertEq(60, uint160(chunkList[0]), "chunk list entry 3");
+        }
+
+        console.log("add 1 record");
+
+        {
+            TokenContract.DebugAppendAccountToMintIndex(1010, 1, address(61));
+
+            (uint32 regularLength, uint32 highLength, uint32 chunksCount) = TokenContract.GetTireData(1010, 1);
+
+            
+            assertEq(59, regularLength, "tire reg memb");
+            assertEq(0, highLength, "tire high rewardmemb");
+            assertEq(3, chunksCount, "tire chunks");
+
+            console.log(" Chunk contents");
+            (uint8 chunkLen, address[CHUNK_SIZE] memory chunkList) = TokenContract.GetTireChunk(1010, 1, 2);
+
+            assertEq(CHUNK_SIZE, chunkLen, "chunk length");
+            assertEq(61, uint160(chunkList[chunkLen - 1]), "chunk list entry 3");
+        }
+
+        console.log("add yet 1 record");
+        
+        {
+            TokenContract.DebugAppendAccountToMintIndex(1010, 1, address(62));
+
+            (uint32 regularLength, uint32 highLength, uint32 chunksCount) = TokenContract.GetTireData(1010, 1);
+
+            
+            assertEq(60, regularLength, "tire reg memb");
+            assertEq(0, highLength, "tire high rewardmemb");
+            assertEq(4, chunksCount, "tire chunks");
+
+            console.log(" Chunk contents");
+            (uint8 chunkLen, address[CHUNK_SIZE] memory chunkList) = TokenContract.GetTireChunk(1010, 1, 3);
+
+            assertEq(1, chunkLen, "chunk length");
+            assertEq(62, uint160(chunkList[0]), "chunk list entry 4");
+        }
+
+    }
+
+    function testChunkListLogicBoosted() public {
+        for (uint256 i = 4; i < 10; i++) {
+            vm.startPrank(Owner);
+            TokenContract.DebugBoostWalletCore(address(uint160(i + 1)));
+            vm.stopPrank();
+        }
+
+        for (uint256 i = 0; i < 10; i++) {
+            vm.startPrank(Owner);
+            TokenContract.DebugAppendAccountToMintIndex(1010, 1, address(uint160(i + 1)));
+            vm.stopPrank();
+        }
+
+        {
+            console.log(" Tire contents");
+
+            (uint32 regularLength, uint32 highLength, uint32 chunksCount) = TokenContract.GetTireData(1010, 1);
+
+            
+            assertEq(4, regularLength, "tire reg memb");
+            assertEq(6, highLength, "tire high rewardmemb");
+            assertEq(1, chunksCount, "tire chunks");
+
+            console.log(" Chunk contents");
+
+            uint256 lastVisitedAddress = 0;
+
+            for (uint256 chunk = 0; chunk < chunksCount; chunk++) {
+                (uint8 chunkLen, address[CHUNK_SIZE] memory chunkList) = TokenContract.GetTireChunk(1010, 1, chunk);
+
+                assertEq(10, chunkLen, "chunk length");
+
+                for (uint256 i = 0; i < chunkLen; i++) {
+                    lastVisitedAddress = chunk * CHUNK_SIZE + i + 1;
+
+                    assertEq(lastVisitedAddress, uint160(chunkList[i]), "chunk list entry 1");
+                }
+            }
+
+            assertEq(10, lastVisitedAddress, "last visited adress");
+        }
+    }
+
+
+
     //TODO: Tests with multiple shadow index iteraions
-    //TODO: double accounting
+    //TODO: double operations
     //TODO: access tests
 
 }
