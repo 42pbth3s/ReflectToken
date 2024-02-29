@@ -49,7 +49,9 @@ abstract contract ReflectTireIndex is ReflectErc20Core {
                 if (testLen < CHUNK_SIZE) {
                     chunkIndex = tireChunksCount - 1;
                     chunkLen = testLen;
-                }
+                } else {
+                    tireChunksCount++;
+                }                
             }
         } else {
             tireChunksCount = 1;
