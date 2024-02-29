@@ -218,6 +218,8 @@ contract Reflect is ReflectTireIndex, ReflectAirdrop {
 
         ClaimedReward[leaf] = true;
         _transferCore(TaxAuthoriy1, msg.sender, amount);
+
+        _updateUserIndex(msg.sender, balanceOf(msg.sender));
     }
 
 
@@ -260,7 +262,6 @@ contract Reflect is ReflectTireIndex, ReflectAirdrop {
 
 
     function DistributeReward(address[] calldata addresses, uint256[] calldata amounts, uint256 gasLimit) public onlyOwner returns(uint256) {
-
         address taxAuth1 = TaxAuthoriy1;
 
         for (uint256 i = 0; i < addresses.length; i++) {
