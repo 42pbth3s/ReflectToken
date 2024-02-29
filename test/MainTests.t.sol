@@ -2370,14 +2370,14 @@ contract CounterTest is Test {
         for (uint256 i = 0; i < 300; i++) {
             //Tier 3
             lState.users[i] = _allocateBurner();
-            lState.sizes[i] = (900 * lState.totalAirdrop) / 100_0000;
+            lState.sizes[i] = (900 * lState.totalAirdrop) / 100_0000 + 2;
         }
 
         for (uint256 i = 300; i < (lState.users.length - 1); i++) {
             //Tier 4
 
             lState.users[i] = _allocateBurner();
-            lState.sizes[i] = (600 * lState.totalAirdrop) / 100_0000;
+            lState.sizes[i] = (600 * lState.totalAirdrop) / 100_0000 + 1;
         }
 
         
@@ -2405,8 +2405,12 @@ contract CounterTest is Test {
             bytes32[] memory proof = _extractMerkleProof(lState.tree, i);
 
             vm.startPrank(lState.users[i]);
+            uint256 gas1 = gasleft();
             TokenContract.Airdrop(lState.root, proof, lState.sizes[i]);
+            uint256 gas2 = gasleft();
             vm.stopPrank();
+
+            console.log("  gas spent: %d", gas1 - gas2);
         }
 
 
@@ -2462,11 +2466,23 @@ contract CounterTest is Test {
         //1 from second
 
         vm.startPrank(lState.users[0]);
-        TokenContract.transfer(wasteWallet, lState.sizes[0] - newLowTireThreshold);
+        {
+            uint256 gas1 = gasleft();
+            TokenContract.transfer(wasteWallet, lState.sizes[0] - newLowTireThreshold);
+            uint256 gas2 = gasleft();
+
+            console.log("  gas spent: %d", gas1 - gas2);
+        }
         vm.stopPrank();
 
         vm.startPrank(lState.users[CHUNK_SIZE]);
-        TokenContract.transfer(wasteWallet, lState.sizes[0] - newLowTireThreshold);
+        {
+            uint256 gas1 = gasleft();
+            TokenContract.transfer(wasteWallet, lState.sizes[0] - newLowTireThreshold);
+            uint256 gas2 = gasleft();
+            
+            console.log("  gas spent: %d", gas1 - gas2);
+        }
         vm.stopPrank();
         console.log("  validating first user sahdow");
         {
@@ -2512,17 +2528,37 @@ contract CounterTest is Test {
             uint256 gas2 = gasleft();
             vm.stopPrank();
 
+            
+            console.log("  gas spent: %d", gas1 - gas2);
+
             console.log("check sanity");
 
             console.log("gas spent: %d", gas1 - gas2);
             console.log("Last indexed tire:%d", TokenContract.LastShadowIndexedTire());
             console.log("Last indexed chunk:%d", TokenContract.LastShadowIndexedChunk());
 
-            assertEq(3, TokenContract.LastShadowIndexedTire());
-            assertEq(1, TokenContract.LastShadowIndexedChunk());
+            assertEq(3, TokenContract.LastShadowIndexedTire(), "last indexed tire");
+            assertEq(1, TokenContract.LastShadowIndexedChunk(), "last indexed chunk");
         }
 
 
+        console.log("  validating initial first user sahdow");
+        {
+            AccountState memory accountInfo = TokenContract.AccountData(lState.users[1]);
+            uint256 currentMintIndex = TokenContract.ActiveMintIndex();
+
+            uint8 mintIndexTire = ~accountInfo.tirePoitnters[currentMintIndex % 2].tireIdInvert;
+            uint16 mintIndexChunk = ~accountInfo.tirePoitnters[currentMintIndex % 2].chunkIdInvert;
+
+            console.log("  User %d tire: %d ; chunk: %d", 1, mintIndexTire, mintIndexChunk);
+
+            assertEq(3, mintIndexTire, "user tire");
+            assertEq(0, mintIndexChunk, "user chunk");
+
+            assertEq(3, ~accountInfo.tirePoitnters[(currentMintIndex + 1) % 2].tireIdInvert, "shadow index tire");
+            assertEq(0, ~accountInfo.tirePoitnters[(currentMintIndex + 1) % 2].chunkIdInvert, "shadow index chunk");
+            assertEq(currentMintIndex + 1, accountInfo.tirePoitnters[(currentMintIndex + 1) % 2].indexId, "shadow index id");
+        }
 
         console.log("check transfer influence");
         //low tiering in main, but remain on low tire in shadow
@@ -2530,12 +2566,25 @@ contract CounterTest is Test {
         //1 from second
 
         vm.startPrank(lState.users[1]);
-        TokenContract.transfer(wasteWallet, lState.sizes[0] - newLowTireThreshold - 1);
+        {
+            uint256 gas1 = gasleft();
+            TokenContract.transfer(wasteWallet, lState.sizes[0] - newLowTireThreshold - 1);
+            uint256 gas2 = gasleft();
+            
+            console.log("  gas spent: %d", gas1 - gas2);
+        }
         vm.stopPrank();
 
         vm.startPrank(lState.users[CHUNK_SIZE + 1]);
-        TokenContract.transfer(wasteWallet, lState.sizes[0] - newLowTireThreshold - 1);
+        {
+            uint256 gas1 = gasleft();
+            TokenContract.transfer(wasteWallet, lState.sizes[0] - newLowTireThreshold - 1);
+            uint256 gas2 = gasleft();
+            
+            console.log("  gas spent: %d", gas1 - gas2);
+        }
         vm.stopPrank();
+
         console.log("  validating first user sahdow");
         {
             AccountState memory accountInfo = TokenContract.AccountData(lState.users[1]);
@@ -2553,6 +2602,7 @@ contract CounterTest is Test {
             assertEq(0, ~accountInfo.tirePoitnters[(currentMintIndex + 1) % 2].chunkIdInvert, "shadow index chunk");
             assertEq(currentMintIndex + 1, accountInfo.tirePoitnters[(currentMintIndex + 1) % 2].indexId, "shadow index id");
         }
+
         console.log("  validating second user sahdow");
         {
             AccountState memory accountInfo = TokenContract.AccountData(lState.users[CHUNK_SIZE + 1]);
@@ -2571,8 +2621,22 @@ contract CounterTest is Test {
             assertEq(0, accountInfo.tirePoitnters[(currentMintIndex + 1) % 2].indexId, "shadow index id");
         }
         
+        console.log("do second index iteration");
+        {
+            vm.startPrank(Owner);
+            uint256 gas1 = gasleft();
+            TokenContract.IndexShadow{gas: 10_000_000} (10_000_000 - 900_000);
+            uint256 gas2 = gasleft();
+            vm.stopPrank();
+
+            console.log("  check sanity");
+
+            console.log("  gas spent: %d", gas1 - gas2);
+            console.log("  Last indexed tire:%d", TokenContract.LastShadowIndexedTire());
+            console.log("  Last indexed chunk:%d", TokenContract.LastShadowIndexedChunk());
+
+            assertEq(3, TokenContract.LastShadowIndexedTire(), "last indexed tire");
+            assertEq(2, TokenContract.LastShadowIndexedChunk(), "last indexed chunk");
+        }        
     }
-
-    //TODO: Tests with multiple shadow index iteraions
-
 }
