@@ -2201,10 +2201,159 @@ contract CounterTest is Test {
         }
     }
 
+    function testDoubleActionLaunchAirdrop() public {
+        console.log("Preparing Airdrop");
 
+        address[] memory users = new address[](5);
+        uint256[] memory sizes = new uint256[](5);
+        uint256 totalAirdropSize = 0;
+
+        for (uint256 i = 0; i < users.length; i++) {
+            users[i] = _allocateBurner();
+            sizes[i] = (i + 1) * 1e18;
+            totalAirdropSize += (i + 1) * 1e18;
+        }
+
+        MerkelTree memory tree = _generateAirdropMerkleTree(users, sizes);
+        bytes32 root = tree.flatTree[tree.flatTree.length - 1];
+
+        
+
+        vm.startPrank(Owner);
+        TokenContract.PrepareAirdrop(root, totalAirdropSize, 20_000);
+        TokenContract.IndexShadow(20_000);
+        TokenContract.LaunchAirdrop();
+
+        TokenContract.StopAirdrop(root);
+        vm.stopPrank();
+
+        console.log("Trying launch 2nd time");
+        
+        vm.startPrank(Owner);
+        vm.expectRevert(bytes("This airdrop has already been registred"));
+        TokenContract.PrepareAirdrop(root, totalAirdropSize, 20_000);
+        vm.stopPrank();
+    }
+
+    function testDoubleActionClaimAirdrop() public {
+        console.log("Preparing Airdrop");
+
+        address[] memory users = new address[](5);
+        uint256[] memory sizes = new uint256[](5);
+        uint256 totalAirdropSize = 0;
+
+        for (uint256 i = 0; i < users.length; i++) {
+            users[i] = _allocateBurner();
+            sizes[i] = (i + 1) * 1e18;
+            totalAirdropSize += (i + 1) * 1e18;
+        }
+
+        MerkelTree memory tree = _generateAirdropMerkleTree(users, sizes);
+        bytes32 root = tree.flatTree[tree.flatTree.length - 1];
+
+        
+
+        vm.startPrank(Owner);
+        TokenContract.PrepareAirdrop(root, totalAirdropSize, 20_000);
+        TokenContract.IndexShadow(20_000);
+        TokenContract.LaunchAirdrop();
+        vm.stopPrank();
+
+        console.log("Claiming Airdrop");
+
+        bytes32[] memory proof = _extractMerkleProof(tree, 0);
+
+        vm.startPrank(users[0]);
+        TokenContract.Airdrop(root, proof, sizes[0]);
+        vm.stopPrank();
+
+        console.log("Claiming Airdrop 2nd tiime");
+
+        vm.startPrank(users[0]);
+        vm.expectRevert(bytes("Already claimed"));
+        TokenContract.Airdrop(root, proof, sizes[0]);
+        vm.stopPrank();
+    }
+
+    
+    function testDoubleActionBoostAccount() public {
+        console.log("boosting account");
+
+        vm.startPrank(Owner);
+        TokenContract.BoostWallet(address(0xabcdef));
+        vm.stopPrank();
+
+        console.log("boosting account 2nd time");
+
+        vm.startPrank(Owner);
+        vm.expectRevert(bytes("Account could be boosted only once"));
+        TokenContract.BoostWallet(address(0xabcdef));
+        vm.stopPrank();
+    }
+
+    function testOwnerAccess() public {
+        vm.startPrank(address(0xface00add));
+
+        bytes memory revertExptMsg = abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", address(0xface00add));
+
+        console.log("PrepareAirdrop");
+        vm.expectRevert(revertExptMsg);
+        TokenContract.PrepareAirdrop(bytes32(uint256(1)), 1, 1);
+
+        console.log("IndexShadow");
+        vm.expectRevert(revertExptMsg);
+        TokenContract.IndexShadow(1);
+
+        console.log("LaunchAirdrop");
+        vm.expectRevert(revertExptMsg);
+        TokenContract.LaunchAirdrop();
+
+        console.log("StopAirdrop");
+        vm.expectRevert(revertExptMsg);
+        TokenContract.StopAirdrop(bytes32(uint256(2)));
+
+        console.log("MintTo");
+        vm.expectRevert(revertExptMsg);
+        TokenContract.MintTo(address(1));
+
+
+
+
+        console.log("LaunchNewRewardCycle");
+        vm.expectRevert(revertExptMsg);
+        TokenContract.LaunchNewRewardCycle();
+
+        console.log("SetTaxRatio");
+        vm.expectRevert(revertExptMsg);
+        TokenContract.SetTaxRatio(1,1);
+
+        console.log("UpdateTaxAuthorities");
+        vm.expectRevert(revertExptMsg);
+        TokenContract.UpdateTaxAuthorities(address(1), address(1));
+
+        console.log("UpdateWhitelisting");
+        vm.expectRevert(revertExptMsg);
+        TokenContract.UpdateWhitelisting(address(1), true);
+
+        console.log("EnableReward");
+        vm.expectRevert(revertExptMsg);
+        TokenContract.StopAirdrop(bytes32(uint256(2)));
+
+        console.log("DisableReward");
+        vm.expectRevert(revertExptMsg);
+        TokenContract.DisableReward(bytes32(uint256(2)));
+
+        console.log("DistributeReward");
+        vm.expectRevert(revertExptMsg);
+        TokenContract.DistributeReward(new address[](0), new uint256[](0), 1);
+
+        console.log("BoostWallet");
+        vm.expectRevert(revertExptMsg);
+        TokenContract.BoostWallet(address(1));
+
+        vm.stopPrank();
+    }
 
     //TODO: Tests with multiple shadow index iteraions
-    //TODO: double operations
-    //TODO: access tests
 
 }
