@@ -18,6 +18,7 @@ contract Reflect is ReflectTireIndex, ReflectAirdrop {
         TaxAuthoriy1 = taxAuth1;
         TaxAuthoriy2 = taxAuth2;
 
+        AutoTaxDistributionEnabled = true;
            
         (_tireThresholds[0], _tireThresholds[1], _tireThresholds[2], _tireThresholds[3])=
             (1_0000, 7000, 3000, 900);
@@ -166,7 +167,8 @@ contract Reflect is ReflectTireIndex, ReflectAirdrop {
             if (taxValue > 0)
                 _transferCore(from, TaxAuthoriy2, taxValue);
 
-            RewardCycles[CurrentRewardCycle].taxed += uint96(auth1Amount);
+            if (AutoTaxDistributionEnabled)
+                RewardCycles[CurrentRewardCycle].taxed += uint96(auth1Amount);
         }
 
         _indexableTransferFrom(from, to, value);
@@ -296,5 +298,9 @@ contract Reflect is ReflectTireIndex, ReflectAirdrop {
             (tireRec.regularLength, tireRec.highLength) = 
                 (tireRec.regularLength - 1, tireRec.highLength + 1);
         }
+    }
+
+    function SwicthAutoTaxDistribution(bool newStatus) public onlyOwner{
+        AutoTaxDistributionEnabled = newStatus;
     }
 }

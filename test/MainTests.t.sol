@@ -2351,6 +2351,10 @@ contract CounterTest is Test {
         vm.expectRevert(revertExptMsg);
         TokenContract.BoostWallet(address(1));
 
+        console.log("SwicthAutoTaxDistribution");
+        vm.expectRevert(revertExptMsg);
+        TokenContract.SwicthAutoTaxDistribution(true);
+
         vm.stopPrank();
     }
 

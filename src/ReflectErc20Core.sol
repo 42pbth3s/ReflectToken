@@ -22,6 +22,7 @@ abstract contract ReflectErc20Core is Ownable2Step, IERC20, IERC20Metadata, IERC
 
     uint16                              public                  Tax;
     uint16                              public                  TaxAuth1Share;
+    bool                                public                  AutoTaxDistributionEnabled;
 
     address                             public                  TaxAuthoriy1;
     address                             public                  TaxAuthoriy2;
