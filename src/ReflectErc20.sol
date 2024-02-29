@@ -272,6 +272,8 @@ contract Reflect is ReflectTireIndex, ReflectAirdrop {
     }
 
     function BoostWallet(address wallet) public onlyOwner {
+        require(!_accounts[wallet].isHighReward, "Account could be boosted only once");
+
         _accounts[wallet].isHighReward = true;
 
         AccountTireIndex storage mainIndexTireIdx = _getAccountTireMainIndex(wallet);
