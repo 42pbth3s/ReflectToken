@@ -2,21 +2,25 @@
 pragma solidity ^0.8.19;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {IERC20Errors} from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
+import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
+
 import {MerkleProof} from "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
 
-import "./ReflectDataModel.sol";
-import {ReflectTireIndex} from "./ReflectTireIndex.sol";
-import {ReflectAirdrop} from "./ReflectAirdrop.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import {IERC20Errors} from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
 
-contract Reflect is ReflectTireIndex, ReflectAirdrop {
-    constructor (uint16 tax, uint16 share1, address taxAuth1, address taxAuth2)
-        Ownable(msg.sender) {
+import "./ReflectDataModel.sol";
+
+contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors {
+    constructor (uint16 tax, uint16 share1, address taxAuth1, address taxAuth2, uint256 amount1, uint256 amount2, uint256 ownerAmount)
+        Ownable(msg.sender)  {
         
         Tax = tax;
         TaxAuth1Share = share1;
         TaxAuthoriy1 = taxAuth1;
         TaxAuthoriy2 = taxAuth2;
+
 
         AutoTaxDistributionEnabled = true;
            
@@ -32,11 +36,62 @@ contract Reflect is ReflectTireIndex, ReflectAirdrop {
 
         (_tirePortion[4], _tirePortion[5], _tirePortion[6], _tirePortion[7]) = 
             (8_00, 6_00, 4_50, 2_50);
+
+        _totalSupply = amount1 + amount2 + ownerAmount;
+
+        _mint(taxAuth1, amount1);
+        _mint(taxAuth2, amount2);
+        _mint(msg.sender, ownerAmount);
         
     }
 
-    /********************************** GENERIC VIEW FUNCTIONs **********************************/
+    uint256                             constant                TIRE_THRESHOLD_BASE = 1_000_000;
 
+
+    uint32                              public                  CurrentRewardCycle;
+
+
+
+    uint16                              public                  Tax;
+    uint16                              public                  TaxAuth1Share;
+    bool                                public                  AutoTaxDistributionEnabled;
+
+    address                             public                  TaxAuthoriy1;
+    address                             public                  TaxAuthoriy2;
+    uint256                             private                 _totalSupply;
+    uint256                             internal                _totalMinted;
+    uint24[FEE_TIRES]                   internal                _tireThresholds;
+    uint16[FEE_TIRES]                   internal                _tirePortion;
+
+    mapping(address => AccountState)    internal                _accounts;
+    mapping(uint256 => RewardCycle)     public                  RewardCycles;
+
+    mapping (address => bool)           public                  Taxable;
+    mapping (bytes32 => bool)           public                  RewardRoots;
+    mapping (bytes32 => bool)           public                  ClaimedReward;
+    
+    //mapping(address account => uint256) internal                _balances;
+    mapping(address account => mapping(address spender => uint256)) internal _allowances;
+
+    /********************************** GENERIC VIEW FUNCTIONs **********************************/
+        function name() public pure returns (string memory) {
+            return "$REFLECT";
+        }
+        function symbol() public pure returns (string memory) {
+            return "$REFLECT";
+        }
+
+        function decimals() public pure returns (uint8) {
+            return 18;
+        }
+
+        function totalSupply() public view returns (uint256) {
+            return _totalSupply;
+        }
+        
+        function allowance(address owner, address spender) public view returns (uint256) {
+            return _allowances[owner][spender];
+        }
 
 
     /*################################# END - GENERIC VIEW FUNCTIONS #################################*/
@@ -45,26 +100,26 @@ contract Reflect is ReflectTireIndex, ReflectAirdrop {
 
     /********************************** CORE LOGIC **********************************/
 
-    function balanceOf(address account) public override view returns (uint256) {
+    function balanceOf(address account) public view returns (uint256) {
         (uint256 balance, ,) = _balanceWithRewards(account);
         return balance;
     }
 
-    function balanceOfWithUpdate(address account) public override returns (uint256) {
+    function balanceOfWithUpdate(address account) public returns (uint256) {
         (uint256 balance, bool requireUpdate, uint256 rewarded) = _balanceWithRewards(account);
 
         if (requireUpdate) {
-            (_accounts[account].balanceBase, _accounts[account].lastRewardId) = 
-                (balance, CurrentRewardCycle);
-
-            address taxAuth1 = TaxAuthoriy1;
-
-            _accounts[taxAuth1].balanceBase -= rewarded;
-            
-            emit Transfer(taxAuth1, account, rewarded);
+            _transferCore(TaxAuthoriy1, account, rewarded);
         }
 
         return balance;
+    }
+
+
+     
+    function approve(address spender, uint256 value) public virtual returns (bool) {
+        _approve(msg.sender, spender, value);
+        return true;
     }
 
     
@@ -81,12 +136,162 @@ contract Reflect is ReflectTireIndex, ReflectAirdrop {
 
     //++++++++++++++++++++++++++++++++ PRIVATE +++++++++++++++++++++
 
+    function _approve(address owner, address spender, uint256 value) internal {
+        _approve(owner, spender, value, true);
+    }
+
+    function _approve(address owner, address spender, uint256 value, bool emitEvent) internal virtual {
+        if (owner == address(0)) {
+            revert ERC20InvalidApprover(address(0));
+        }
+        if (spender == address(0)) {
+            revert ERC20InvalidSpender(address(0));
+        }
+        _allowances[owner][spender] = value;
+        if (emitEvent) {
+            emit Approval(owner, spender, value);
+        }
+    }
+
+    function _spendAllowance(address owner, address spender, uint256 value) internal virtual {
+        uint256 currentAllowance = allowance(owner, spender);
+        if (currentAllowance != type(uint256).max) {
+            if (currentAllowance < value) {
+                revert ERC20InsufficientAllowance(spender, currentAllowance, value);
+            }
+            unchecked {
+                _approve(owner, spender, currentAllowance - value, false);
+            }
+        }
+    }
+
+    function _mint(address account, uint256 value) internal {
+        if (account == address(0)) {
+            revert ERC20InvalidReceiver(address(0));
+        }
+        _transferCore(address(0), account, value);
+    }
+    
+    /**
+     * @dev Transfers a `value` amount of tokens from `from` to `to`, or alternatively mints (or burns) if `from`
+     * (or `to`) is the zero address. All customizations to transfers, mints, and burns should be done by overriding
+     * this function.
+     *
+     * Emits a {Transfer} event.
+     */
+    function _transferCore(address from, address to, uint256 value) internal {
+        if (from == address(0)) {
+            // Overflow check required: The rest of the code assumes that totalSupply never overflows            
+            _totalMinted += value;
+
+            require(_totalMinted <= _totalSupply, "Cannot mint more then initial supply");
+        } else {
+            uint256 tSupply = _totalSupply;
+            (uint8 initialTire, bool tireFound) = _getIndexTireByBalance(_accounts[from].balanceBase, tSupply);
+
+            uint256 fromBalance = balanceOfWithUpdate(from);
+
+            if (fromBalance < value) {
+                revert ERC20InsufficientBalance(from, fromBalance, value);
+            }
+            uint256 newBalance;
+            unchecked {
+                // Overflow not possible: value <= fromBalance <= totalSupply.
+                newBalance = fromBalance - value;
+                _accounts[from].balanceBase  = newBalance;
+            }
+
+            if (tireFound) {
+                uint8 newTire;
+                (newTire, tireFound) = _getIndexTireByBalance(newBalance, tSupply);
+
+                bool userBoosted = _accounts[from].isHighReward;
+
+                if (!tireFound || (initialTire != newTire)) {
+                    if (userBoosted) {
+                        --RewardCycles[CurrentRewardCycle].stat[initialTire].boostedMembers;
+
+                        if (tireFound) {
+                            ++RewardCycles[CurrentRewardCycle].stat[newTire].boostedMembers;
+                        }
+                    } else {
+                        --RewardCycles[CurrentRewardCycle].stat[initialTire].regularMembers;
+
+                        if (tireFound) {
+                            ++RewardCycles[CurrentRewardCycle].stat[newTire].regularMembers;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (to == address(0)) {
+            require(false, "Burning token isn't possible");
+            /*
+            unchecked {
+                // Overflow not possible: value <= totalSupply or value <= fromBalance <= totalSupply.
+                _totalSupply -= value;
+            }//*/
+        } else {
+            uint256 tSupply = _totalSupply;
+            (uint8 initialTire, bool initTireFound) = _getIndexTireByBalance(_accounts[to].balanceBase, tSupply);
+            
+            unchecked {
+                // Overflow not possible: balance + value is at most totalSupply, which we know fits into a uint256.
+                _accounts[to].balanceBase += value;
+            }
+
+            (uint8 newTire, bool newTireFound) = _getIndexTireByBalance(_accounts[to].balanceBase, tSupply);
+
+            if ((initTireFound != newTireFound) || (initTireFound && newTireFound && (initialTire != newTire))) {
+                bool userBoosted = _accounts[from].isHighReward;
+
+                if (initTireFound) {
+                    if (userBoosted) {
+                        --RewardCycles[CurrentRewardCycle].stat[initialTire].boostedMembers;
+                 
+                    } else {
+                        --RewardCycles[CurrentRewardCycle].stat[initialTire].regularMembers;
+                    }
+                }
+
+                if (newTireFound) {
+                    if (userBoosted) {
+                        ++RewardCycles[CurrentRewardCycle].stat[newTire].boostedMembers;
+                 
+                    } else {
+                        ++RewardCycles[CurrentRewardCycle].stat[newTire].regularMembers;
+                    }
+                }
+            }
+        }
+
+        emit Transfer(from, to, value);
+    }
+
+
+        
+    function _getIndexTireByBalance(uint256 balance, uint256 tSupply) private view returns (uint8, bool) {        
+        uint256 share = balance * TIRE_THRESHOLD_BASE / tSupply;
+
+        unchecked {
+            for (uint256 j = 0; j < FEE_TIRES; j++) {
+                if (share >= _tireThresholds[j]) {
+                    return (uint8(j), true);
+                }
+            }
+        }
+
+        return (type(uint8).max, false);
+    }
+
     struct _balanceState {
         uint256 resultBalance;
         bool needUpdate;
         uint256 rewarded;
         uint256 rewardCycle;
         bool highReward;
+        uint256 totalSupply;
     }
 
     //This funcation assumes that balance hasn't been changed since last transfer happen
@@ -94,34 +299,27 @@ contract Reflect is ReflectTireIndex, ReflectAirdrop {
     function _balanceWithRewards(address wallet) private view returns (uint256, bool, uint256) {
         _balanceState memory lState;
 
-        (lState.resultBalance, lState.rewardCycle, lState.highReward) = 
-            (_accounts[wallet].balanceBase, _accounts[wallet].lastRewardId, _accounts[wallet].isHighReward);
+        AccountState storage accState = _accounts[wallet];
 
-        if (
-                (wallet == LockedMintAddress()) ||
-                (wallet == AvailableMintAddress())
-        ) {
-            // special accounts doesn't take participation in rewards
-            return (lState.resultBalance, false, 0);
-        }
+        (lState.resultBalance, lState.rewardCycle, lState.highReward) = 
+            (accState.balanceBase, accState.lastRewardId, accState.isHighReward);
 
         lState.needUpdate = false;
         lState.rewarded = 0;
+        lState.totalSupply = _totalSupply;
 
         uint32 maxRewardId = CurrentRewardCycle;
         for (; lState.rewardCycle < maxRewardId; lState.rewardCycle++) {
             lState.needUpdate = true;
 
-            (uint96 taxed, uint24 mintIndex) = (RewardCycles[lState.rewardCycle].taxed, RewardCycles[lState.rewardCycle].mintIndex);
-
-            uint256 historicTotalSupply = MintIndexes[mintIndex].totalSupply;
-            (uint8 tire, bool tireFound) = _getIndexTireByBalance(lState.resultBalance, historicTotalSupply);
+            uint96 taxed = RewardCycles[lState.rewardCycle].taxed;
+            (uint8 tire, bool tireFound) = _getIndexTireByBalance(lState.resultBalance, lState.totalSupply);
 
             if (tireFound) {
                 uint256 tirePool = _tirePortion[tire] * taxed / 10_000;
                 //TODO: Potential gas optimisation
                 (uint32 regular, uint32 high) = 
-                    (MintIndexes[mintIndex].tires[tire].regularLength, MintIndexes[mintIndex].tires[tire].highLength);
+                    (RewardCycles[lState.rewardCycle].stat[tire].regularMembers, RewardCycles[lState.rewardCycle].stat[tire].boostedMembers);
 
                 uint256 rewardShare;
 
@@ -171,7 +369,7 @@ contract Reflect is ReflectTireIndex, ReflectAirdrop {
                 RewardCycles[CurrentRewardCycle].taxed += uint96(auth1Amount);
         }
 
-        _indexableTransferFrom(from, to, value);
+        _transferCore(from, to, value);
 
         //Here RewardCycles can be be closed automaticlly
         //Just by uncommenting line below
@@ -179,27 +377,11 @@ contract Reflect is ReflectTireIndex, ReflectAirdrop {
 
         return true;
     }
-    
-    function _indexableTransferFrom(address from, address to, uint256 value) private {
-        if (from == address(0)) {
-            revert ERC20InvalidSender(address(0));
-        }
-        if (to == address(0)) {
-            revert ERC20InvalidReceiver(address(0));
-        }
-
-        _transferCore(from, to, value);
-
-        _updateUserIndex(from, _accounts[from].balanceBase);   
-        _updateUserIndex(to, _accounts[to].balanceBase);
-    }
-
 
     function _newRewardCycle() private {
         uint256 nextRewardCycle = CurrentRewardCycle + 1;
 
-        (RewardCycles[nextRewardCycle].taxed, RewardCycles[nextRewardCycle].mintIndex) = 
-            (0, ActiveMintIndex);
+        RewardCycles[nextRewardCycle].taxed = 0;
         
         CurrentRewardCycle = uint32(nextRewardCycle);
     }
@@ -218,8 +400,6 @@ contract Reflect is ReflectTireIndex, ReflectAirdrop {
 
         ClaimedReward[leaf] = true;
         _transferCore(TaxAuthoriy1, msg.sender, amount);
-
-        _updateUserIndex(msg.sender, balanceOf(msg.sender));
     }
 
 
@@ -243,8 +423,8 @@ contract Reflect is ReflectTireIndex, ReflectAirdrop {
         TaxAuthoriy1 = taxAuth1;
         TaxAuthoriy2 = taxAuth2;
 
-        _indexableTransferFrom(oldAuth1, taxAuth1, balanceOf(oldAuth1));
-        _indexableTransferFrom(oldAuth2, taxAuth2, balanceOf(oldAuth2));
+        _transferCore(oldAuth1, taxAuth1, balanceOf(oldAuth1));
+        _transferCore(oldAuth2, taxAuth2, balanceOf(oldAuth2));
     }
 
     function UpdateWhitelisting(address add, bool taxStatus) public onlyOwner {
@@ -276,28 +456,17 @@ contract Reflect is ReflectTireIndex, ReflectAirdrop {
 
     function BoostWallet(address wallet) public onlyOwner {
         require(!_accounts[wallet].isHighReward, "Account could be boosted only once");
+        //TODO: limit max amount
 
         _accounts[wallet].isHighReward = true;
 
-        AccountTireIndex storage mainIndexTireIdx = _getAccountTireMainIndex(wallet);
 
-        uint256 currentMintIndex = ActiveMintIndex;
-        if (mainIndexTireIdx.tireIdInvert != 0) {
-            IndexTire storage tireRec = MintIndexes[currentMintIndex].tires[~mainIndexTireIdx.tireIdInvert];
+        (uint8 tire, bool tireFound) = _getIndexTireByBalance(_accounts[wallet].balanceBase, _totalSupply);
 
-            (tireRec.regularLength, tireRec.highLength) = 
-                (tireRec.regularLength - 1, tireRec.highLength + 1);
-        }
+        if (tireFound) {
+            RewardCycleStat storage rewstat = RewardCycles[CurrentRewardCycle].stat[tire];
 
-        AccountTireIndex storage shadowIndexTireIdx = _getAccountTireShadowIndex(wallet);
-        if (
-            (shadowIndexTireIdx.indexId == (currentMintIndex + 1)) &&
-            (shadowIndexTireIdx.tireIdInvert != 0)
-        ) {
-            IndexTire storage tireRec = MintIndexes[currentMintIndex + 1].tires[~shadowIndexTireIdx.tireIdInvert];
-
-            (tireRec.regularLength, tireRec.highLength) = 
-                (tireRec.regularLength - 1, tireRec.highLength + 1);
+            (rewstat.regularMembers, rewstat.boostedMembers) = (rewstat.regularMembers - 1, rewstat.boostedMembers + 1);
         }
     }
 
