@@ -135,13 +135,6 @@ abstract contract ReflectErc20Core is Ownable2Step, IERC20, IERC20Metadata, IERC
             }
         }
     }
-    /*
-    function _burn(address account, uint256 value) internal {
-        if (account == address(0)) {
-            revert ERC20InvalidSender(address(0));
-        }
-        _update(account, address(0), value);
-    }//*/
 
     function _mint(address account, uint256 value) internal {
         if (account == address(0)) {
