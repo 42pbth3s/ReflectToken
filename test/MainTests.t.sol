@@ -654,22 +654,22 @@ contract CounterTest is Test {
 
 
 
-    struct _airDropTireingState {
+    struct _airDropTieringState {
         address[]  users;
         uint256[]  sizes;
-        uint8[]    tires;
+        uint8[]    tiers;
         uint256    totalAirdrop;
         bytes32    root;
 
         MerkelTree tree;
     }
 
-    function testTransferRetireing() public {
-        _airDropTireingState memory lState;
+    function testTransferRetiering() public {
+        _airDropTieringState memory lState;
 
         lState.users = new address[](19);
         lState.sizes = new uint256[](lState.users.length);
-        lState.tires = new uint8[](lState.users.length - 1);
+        lState.tiers = new uint8[](lState.users.length - 1);
 
         lState.totalAirdrop = TokenContract.totalSupply();
 
@@ -680,48 +680,48 @@ contract CounterTest is Test {
         //           100_0000
         lState.sizes[0] =    (1_5000 * lState.totalAirdrop) / 100_0000;
         lState.sizes[1] =    (1_0000 * lState.totalAirdrop) / 100_0000;
-        lState.tires[0] = 0;
-        lState.tires[1] = 0;
+        lState.tiers[0] = 0;
+        lState.tiers[1] = 0;
 
         lState.sizes[2] =    (  8000 * lState.totalAirdrop) / 100_0000;
         lState.sizes[3] =    (  7000 * lState.totalAirdrop) / 100_0000;
-        lState.tires[2] = 1;
-        lState.tires[3] = 1;
+        lState.tiers[2] = 1;
+        lState.tiers[3] = 1;
         
         lState.sizes[4] =    (  4000 * lState.totalAirdrop) / 100_0000;
         lState.sizes[5] =    (  3000 * lState.totalAirdrop) / 100_0000;
-        lState.tires[4] = 2;
-        lState.tires[5] = 2;
+        lState.tiers[4] = 2;
+        lState.tiers[5] = 2;
         
         lState.sizes[6] =    (  1000 * lState.totalAirdrop) / 100_0000;
         lState.sizes[7] =    (   900 * lState.totalAirdrop) / 100_0000;
-        lState.tires[6] = 3;
-        lState.tires[7] = 3;
+        lState.tiers[6] = 3;
+        lState.tiers[7] = 3;
     
         lState.sizes[8] =    (   700 * lState.totalAirdrop) / 100_0000;
         lState.sizes[9] =    (   600 * lState.totalAirdrop) / 100_0000;
-        lState.tires[8] = 4;
-        lState.tires[9] = 4;
+        lState.tiers[8] = 4;
+        lState.tiers[9] = 4;
         
         lState.sizes[10] =   (   400 * lState.totalAirdrop) / 100_0000;
         lState.sizes[11] =   (   300 * lState.totalAirdrop) / 100_0000;
-        lState.tires[10] = 5;
-        lState.tires[11] = 5;
+        lState.tiers[10] = 5;
+        lState.tiers[11] = 5;
         
         lState.sizes[12] =   (   100 * lState.totalAirdrop) / 100_0000;
         lState.sizes[13] =   (    90 * lState.totalAirdrop) / 100_0000;
-        lState.tires[12] = 6;
-        lState.tires[13] = 6;
+        lState.tiers[12] = 6;
+        lState.tiers[13] = 6;
         
         lState.sizes[14] =   (    60 * lState.totalAirdrop) / 100_0000;
         lState.sizes[15] =   (    50 * lState.totalAirdrop) / 100_0000;
-        lState.tires[14] = 7;
-        lState.tires[15] = 7;
+        lState.tiers[14] = 7;
+        lState.tiers[15] = 7;
         
         lState.sizes[16] =   (    40 * lState.totalAirdrop) / 100_0000;
         lState.sizes[17] =   (    30 * lState.totalAirdrop) / 100_0000;
-        lState.tires[16] = type(uint8).max;
-        lState.tires[17] = type(uint8).max;
+        lState.tiers[16] = type(uint8).max;
+        lState.tiers[17] = type(uint8).max;
 
         lState.sizes[18] = lState.totalAirdrop;
 
@@ -735,13 +735,13 @@ contract CounterTest is Test {
 
             _fundWallet(lState.users[i], lState.sizes[i]);
 
-            if (lState.tires[i] != type(uint8).max) {
-                RewardCycleStat memory tireStat = TokenContract.GetRewardCycleStat(TokenContract.CurrentRewardCycle(), lState.tires[i]);
+            if (lState.tiers[i] != type(uint8).max) {
+                RewardCycleStat memory tierStat = TokenContract.GetRewardCycleStat(TokenContract.CurrentRewardCycle(), lState.tiers[i]);
 
       
-                console.log("Tire %d stat: regular: %d, boosted: %d", lState.tires[i], tireStat.regularMembers, tireStat.boostedMembers);
-                assertEq(1 + (i & 1), tireStat.regularMembers, "reg Membs");
-                assertEq(0, tireStat.boostedMembers, "bst Membs");
+                console.log("Tier %d stat: regular: %d, boosted: %d", lState.tiers[i], tierStat.regularMembers, tierStat.boostedMembers);
+                assertEq(1 + (i & 1), tierStat.regularMembers, "reg Membs");
+                assertEq(0, tierStat.boostedMembers, "bst Membs");
             }
 
 
@@ -750,40 +750,40 @@ contract CounterTest is Test {
 
         address wasteWallet = _allocateBurner();
         
-        console.log("Transfer some tokens & test reteiring. 1st move to tire 7");
+        console.log("Transfer some tokens & test reteiring. 1st move to tier 7");
         vm.startPrank(lState.users[0]);
-        TokenContract.transfer(wasteWallet, lState.sizes[0] - lState.sizes[15]); // -> moving to tire7
+        TokenContract.transfer(wasteWallet, lState.sizes[0] - lState.sizes[15]); // -> moving to tier7
         vm.stopPrank();
 
         {
-            RewardCycleStat memory tireStat = TokenContract.GetRewardCycleStat(TokenContract.CurrentRewardCycle(), 0);
+            RewardCycleStat memory tierStat = TokenContract.GetRewardCycleStat(TokenContract.CurrentRewardCycle(), 0);
 
-            console.log("Tire 0 stat: regular: %d, boosted: %d", tireStat.regularMembers, tireStat.boostedMembers);
-            assertEq(2, tireStat.regularMembers, "reg Membs");
-            assertEq(0, tireStat.boostedMembers, "bst Membs");
+            console.log("Tier 0 stat: regular: %d, boosted: %d", tierStat.regularMembers, tierStat.boostedMembers);
+            assertEq(2, tierStat.regularMembers, "reg Membs");
+            assertEq(0, tierStat.boostedMembers, "bst Membs");
 
-            tireStat = TokenContract.GetRewardCycleStat(TokenContract.CurrentRewardCycle(), 7);
-            console.log("Tire 7 stat: regular: %d, boosted: %d", tireStat.regularMembers, tireStat.boostedMembers);
-            assertEq(3, tireStat.regularMembers, "reg Membs 2");
-            assertEq(0, tireStat.boostedMembers, "bst Membs 2");
+            tierStat = TokenContract.GetRewardCycleStat(TokenContract.CurrentRewardCycle(), 7);
+            console.log("Tier 7 stat: regular: %d, boosted: %d", tierStat.regularMembers, tierStat.boostedMembers);
+            assertEq(3, tierStat.regularMembers, "reg Membs 2");
+            assertEq(0, tierStat.boostedMembers, "bst Membs 2");
         }
 
-        console.log("move outside tires");
+        console.log("move outside tiers");
         vm.startPrank(lState.users[0]);
         TokenContract.transfer(wasteWallet, lState.sizes[15] - lState.sizes[16]); // -> moving out from index
         vm.stopPrank();
 
         {
-            RewardCycleStat memory tireStat = TokenContract.GetRewardCycleStat(TokenContract.CurrentRewardCycle(), 0);
+            RewardCycleStat memory tierStat = TokenContract.GetRewardCycleStat(TokenContract.CurrentRewardCycle(), 0);
 
-            console.log("Tire 0 stat: regular: %d, boosted: %d", tireStat.regularMembers, tireStat.boostedMembers);
-            assertEq(2, tireStat.regularMembers, "reg Membs");
-            assertEq(0, tireStat.boostedMembers, "bst Membs");
+            console.log("Tier 0 stat: regular: %d, boosted: %d", tierStat.regularMembers, tierStat.boostedMembers);
+            assertEq(2, tierStat.regularMembers, "reg Membs");
+            assertEq(0, tierStat.boostedMembers, "bst Membs");
 
-            tireStat = TokenContract.GetRewardCycleStat(TokenContract.CurrentRewardCycle(), 7);
-            console.log("Tire 7 stat: regular: %d, boosted: %d", tireStat.regularMembers, tireStat.boostedMembers);
-            assertEq(2, tireStat.regularMembers, "reg Membs 2");
-            assertEq(0, tireStat.boostedMembers, "bst Membs 2");
+            tierStat = TokenContract.GetRewardCycleStat(TokenContract.CurrentRewardCycle(), 7);
+            console.log("Tier 7 stat: regular: %d, boosted: %d", tierStat.regularMembers, tierStat.boostedMembers);
+            assertEq(2, tierStat.regularMembers, "reg Membs 2");
+            assertEq(0, tierStat.boostedMembers, "bst Membs 2");
         }
     }
 
@@ -1089,7 +1089,7 @@ contract CounterTest is Test {
             lState.users[i] = _allocateBurner();
         }
 
-        lState.sizes[0] =    (1_0000 * lState.totalAirdrop) / 100_0000 - 100; //2nd tire
+        lState.sizes[0] =    (1_0000 * lState.totalAirdrop) / 100_0000 - 100; //2nd tier
         lState.sizes[1] =    (  7000 * lState.totalAirdrop) / 100_0000;
         lState.sizes[2] =    (  7000 * lState.totalAirdrop) / 100_0000;
         lState.sizes[3] =    (  7000 * lState.totalAirdrop) / 100_0000;

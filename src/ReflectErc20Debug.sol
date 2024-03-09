@@ -13,11 +13,11 @@ contract ReflectDebug is Reflect {
 
 
     
-    function TireThresholds() public view returns(uint24[FEE_TIRES] memory) {
-        return _tireThresholds;
+    function TierThresholds() public view returns(uint24[FEE_TIERS] memory) {
+        return _tierThresholds;
     }
-    function TirePortion() public view returns(uint16[FEE_TIRES] memory) {
-        return _tirePortion;
+    function TierPortion() public view returns(uint16[FEE_TIERS] memory) {
+        return _tierPortion;
     }
 
     function AccountData(address wallet) public view returns(AccountState memory) {
@@ -29,7 +29,7 @@ contract ReflectDebug is Reflect {
         _accounts[wallet].isHighReward = true;
     }
 
-    function GetRewardCycleStat(uint256 rewcycle, uint256 tire) public view returns (RewardCycleStat memory) {
-        return RewardCycles[rewcycle].stat[tire];
+    function GetRewardCycleStat(uint256 rewcycle, uint256 tier) public view returns (RewardCycleStat memory) {
+        return RewardCycles[rewcycle].stat[tier];
     }
 }

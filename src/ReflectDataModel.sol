@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: NONE
 pragma solidity ^0.8.19;
 
-uint256 constant FEE_TIRES = 8;
+uint256 constant FEE_TIERS = 8;
 
 struct AccountState {
     uint256 balanceBase;
@@ -18,5 +18,5 @@ struct RewardCycleStat {
 
 struct RewardCycle {
     uint96 taxed;
-    RewardCycleStat[FEE_TIRES] stat;
+    RewardCycleStat[FEE_TIERS] stat;
 }
