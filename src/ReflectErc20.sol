@@ -41,7 +41,7 @@ contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors {
         _totalSupply = tSupply;
 
         _mint(address(this), tSupply);
-        approve(msg.sender, type(uint256).max);
+        _approve(address(this), msg.sender, type(uint256).max);
 
         _initialized = true;
     }
@@ -108,7 +108,8 @@ contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors {
 
         if (requireUpdate) {
             _accounts[account].lastRewardId = CurrentRewardCycle;
-            _transferCore(address(this), account, rewarded, true);
+            if (rewarded != 0)
+                _transferCore(address(this), account, rewarded, true);
         }
 
         return balance;
@@ -120,8 +121,9 @@ contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors {
         (, bool requireUpdate, uint256 rewarded) = _balanceWithRewardsToRewardCycle(account, maxRewardId);
 
         if (requireUpdate) {
-            _accounts[account].lastRewardId = CurrentRewardCycle;
-            _transferCore(address(this), account, rewarded, true);
+            _accounts[account].lastRewardId = maxRewardId;
+            if (rewarded != 0)
+                _transferCore(address(this), account, rewarded, true);
         }
 
     }
@@ -238,17 +240,16 @@ contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors {
         emit Transfer(from, to, value);
     }
 
-    function _updateUserStat(address wallet, uint256 initBalance, uint256 newBalance, uint256 tSupply) private {        
+    function _updateUserStat(address wallet, uint256 initBalance, uint256 newBalance, uint256 tSupply) private {
         (uint8 initialTire, bool initTireFound) = _getIndexTireByBalance(initBalance, tSupply);
         (uint8 newTire, bool newTireFound) = _getIndexTireByBalance(newBalance, tSupply);
+        (bool userBoosted, bool userExcluded) = (_accounts[wallet].isHighReward, _accounts[wallet].excludedFromRewards);
 
-        if (wallet == address(this))
+        if ((wallet == address(this)) || userExcluded)
             return;
 
 
         if ((initTireFound != newTireFound) || (initTireFound && newTireFound && (initialTire != newTire))) {
-            bool userBoosted = _accounts[wallet].isHighReward;
-
             if (initTireFound) {
                 if (userBoosted) {
                     --RewardCycles[CurrentRewardCycle].stat[initialTire].boostedMembers;
@@ -307,15 +308,29 @@ contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors {
 
         AccountState storage accState = _accounts[wallet];
 
-        (lState.resultBalance, lState.rewardCycle, lState.highReward) = 
-            (accState.balanceBase, accState.lastRewardId, accState.isHighReward);
+        {
+            bool excluded;
+            (lState.resultBalance, lState.rewardCycle, lState.highReward, excluded) = 
+                (accState.balanceBase, accState.lastRewardId, accState.isHighReward, accState.excludedFromRewards);
 
-        if (address(this) == wallet)
-            return (lState.resultBalance, false, 0);
+            if ((address(this) == wallet) || excluded)
+                return (lState.resultBalance, false, 0);
+        }
 
         lState.needUpdate = false;
         lState.rewarded = 0;
         lState.maxRewardId = maxRewardId;
+
+        {
+            (, bool tireFound) = _getIndexTireByBalance(lState.resultBalance, _totalSupply);
+
+            //No rewards with given balance
+            //just return balance as it is and update based on lastRewardId
+            //that avoids pointless looping through all cycles and wasting gas
+
+            if (!tireFound)
+                return (lState.resultBalance, lState.rewardCycle < lState.maxRewardId, 0);
+        }
 
         for (; lState.rewardCycle < lState.maxRewardId; ++lState.rewardCycle) {
             lState.needUpdate = true;
@@ -323,7 +338,7 @@ contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors {
             RewardCycle storage rewCycle = RewardCycles[lState.rewardCycle];
 
             uint96 taxed = rewCycle.taxed;
-            (uint8 tire, bool tireFound) = _getIndexTireByBalance(lState.resultBalance, _totalSupply);
+            (uint8 tire, bool tireFound) = _getIndexTireByBalance(lState.resultBalance + lState.rewarded, _totalSupply);
 
             if (tireFound) {
                 uint256 tirePool = _tirePortion[tire] * taxed / 10_000;
@@ -455,7 +470,7 @@ contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors {
 
 
     function DistributeReward(address[] calldata addresses, uint256[] calldata amounts, uint256 gasLimit) public onlyOwner returns(uint256) {
-        for (uint256 i = 0; i < addresses.length; i++) {
+        for (uint256 i = 0; i < addresses.length; ++i) {
             _transferCore(address(this), addresses[i], amounts[i]);
 
             if (gasleft() < gasLimit)
@@ -481,7 +496,27 @@ contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors {
         }
     }
 
-    function SwicthAutoTaxDistribution(bool newStatus) public onlyOwner{
+    function SwicthAutoTaxDistribution(bool newStatus) public onlyOwner {
         AutoTaxDistributionEnabled = newStatus;
+    }
+
+    function ExcludeWalletFromRewards(address wallet) public onlyOwner {
+        uint256 balance = balanceOfWithUpdate(wallet);
+
+        if (!_accounts[wallet].excludedFromRewards) {
+            _accounts[wallet].excludedFromRewards = true;
+
+            
+            (uint8 tire, bool tireFound) = _getIndexTireByBalance(balance, _totalSupply);
+
+            if (tireFound) {
+                if (_accounts[wallet].isHighReward) {
+                    --RewardCycles[CurrentRewardCycle].stat[tire].boostedMembers;
+                
+                } else {
+                    --RewardCycles[CurrentRewardCycle].stat[tire].regularMembers;
+                }
+            }
+        }
     }
 }

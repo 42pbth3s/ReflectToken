@@ -7,6 +7,7 @@ struct AccountState {
     uint256 balanceBase;
     uint32 lastRewardId;
     bool isHighReward;
+    bool excludedFromRewards;
 }
 
 
