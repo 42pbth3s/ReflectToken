@@ -341,25 +341,21 @@ contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors {
             (uint8 tire, bool tireFound) = _getIndexTireByBalance(lState.resultBalance + lState.rewarded, _totalSupply);
 
             if (tireFound) {
-                uint256 tirePool = _tirePortion[tire] * taxed / 10_000;
-                (uint32 regular, uint32 high) = 
+                uint256 tirePool = _tirePortion[tire] * taxed / 100_00;
+                (uint32 regular, uint32 boosted) = 
                     (rewCycle.stat[tire].regularMembers, rewCycle.stat[tire].boostedMembers);
 
-                uint256 rewardShare;
-
                 unchecked {
-                    uint256 nominator = 10_000;
-                    uint256 denominator = 10_000 * regular + 10_100 * high;
-
-                    if (lState.highReward) {
-                        nominator *= 10_100;
-                    } else {
-                        nominator *= 10_000;
-                    }
-
+                    uint256 nominator = (100 - boosted) * 100_000;
+                    uint256 denominator = 100 * (regular + boosted);
                     uint256 shareRatio = nominator / denominator;
 
-                    rewardShare = tirePool * shareRatio / 10_000;
+                    if (lState.highReward) {
+                        shareRatio += 1_000;
+                    } 
+
+
+                    uint256 rewardShare = tirePool * shareRatio / 100_000;
 
                     lState.rewarded += rewardShare;
                 }
