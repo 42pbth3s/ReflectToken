@@ -1174,10 +1174,15 @@ contract CounterTest is Test {
         assertEq(4269375 * 1e11, TokenContract.balanceOf(lState.users[2]) - lState.oldBalances[2], "assigned reward 2");
         assertEq(4269375 * 1e11, TokenContract.balanceOf(lState.users[3]) - lState.oldBalances[3], "assigned reward 3");
         
-
         
         for (uint256 i = 0; i < lState.users.length; i++) {
-            TokenContract.balanceOfWithUpdate(lState.users[i]);
+            address user = lState.users[i];
+            uint256 gasBefore = gasleft();
+            TokenContract.balanceOfWithUpdate(user);
+            uint256 gasAfter = gasleft();
+
+            console.log("Gas usage by balanceOfWithUpdate (2 rew cycles): %d", gasBefore - gasAfter);
+
             lState.oldBalances[i] = TokenContract.balanceOf(lState.users[i]);
         }
 
@@ -1212,7 +1217,12 @@ contract CounterTest is Test {
 
         
         for (uint256 i = 0; i < lState.users.length; i++) {
-            TokenContract.balanceOfWithUpdate(lState.users[i]);
+            address user = lState.users[i];
+            uint256 gasBefore = gasleft();
+            TokenContract.balanceOfWithUpdate(user);
+            uint256 gasAfter = gasleft();
+
+            console.log("Gas usage by balanceOfWithUpdate (1 rew cycles): %d", gasBefore - gasAfter);
             lState.oldBalances[i] = TokenContract.balanceOf(lState.users[i]);
         }
 
