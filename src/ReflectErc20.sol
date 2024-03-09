@@ -114,20 +114,6 @@ contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors {
 
         return balance;
     }
-
-    function ProcessRewardsForUser(address account, uint32 maxRewardId) public {
-        require(maxRewardId <= CurrentRewardCycle, "maxRewardId cannot exceed current reward cycle id");
-
-        (, bool requireUpdate, uint256 rewarded) = _balanceWithRewardsToRewardCycle(account, maxRewardId);
-
-        if (requireUpdate) {
-            _accounts[account].lastRewardId = maxRewardId;
-            if (rewarded != 0)
-                _transferCore(address(this), account, rewarded, true);
-        }
-
-    }
-     
     function approve(address spender, uint256 value) public virtual returns (bool) {
         _approve(msg.sender, spender, value);
         return true;
@@ -299,6 +285,7 @@ contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors {
         uint256 rewardCycle;
         bool highReward;
         uint32 maxRewardId;
+        uint8 tire;
     }
 
     //This funcation assumes that balance hasn't been changed since last transfer happen
@@ -322,7 +309,8 @@ contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors {
         lState.maxRewardId = maxRewardId;
 
         {
-            (, bool tireFound) = _getIndexTireByBalance(lState.resultBalance, _totalSupply);
+            bool tireFound;
+            (lState.tire, tireFound) = _getIndexTireByBalance(lState.resultBalance, _totalSupply);
 
             //No rewards with given balance
             //just return balance as it is and update based on lastRewardId
@@ -338,27 +326,24 @@ contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors {
             RewardCycle storage rewCycle = RewardCycles[lState.rewardCycle];
 
             uint96 taxed = rewCycle.taxed;
-            (uint8 tire, bool tireFound) = _getIndexTireByBalance(lState.resultBalance + lState.rewarded, _totalSupply);
 
-            if (tireFound) {
-                uint256 tirePool = _tirePortion[tire] * taxed / 100_00;
-                (uint32 regular, uint32 boosted) = 
-                    (rewCycle.stat[tire].regularMembers, rewCycle.stat[tire].boostedMembers);
+            uint256 tirePool = _tirePortion[lState.tire] * taxed / 100_00;
+            (uint32 regular, uint32 boosted) = 
+                (rewCycle.stat[lState.tire].regularMembers, rewCycle.stat[lState.tire].boostedMembers);
 
-                unchecked {
-                    uint256 nominator = (100 - boosted) * 100_000;
-                    uint256 denominator = 100 * (regular + boosted);
-                    uint256 shareRatio = nominator / denominator;
+            unchecked {
+                uint256 nominator = (100 - boosted) * 100_000;
+                uint256 denominator = 100 * (regular + boosted);
+                uint256 shareRatio = nominator / denominator;
 
-                    if (lState.highReward) {
-                        shareRatio += 1_000;
-                    } 
+                if (lState.highReward) {
+                    shareRatio += 1_000;
+                } 
 
 
-                    uint256 rewardShare = tirePool * shareRatio / 100_000;
+                uint256 rewardShare = tirePool * shareRatio / 100_000;
 
-                    lState.rewarded += rewardShare;
-                }
+                lState.rewarded += rewardShare;
             }
         }
 
@@ -404,11 +389,27 @@ contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors {
     }
 
     function _newRewardCycle() private {
-        uint256 nextRewardCycle = CurrentRewardCycle + 1;
+        uint256 oldRewardCycle = CurrentRewardCycle;
+        uint256 nextRewardCycle;
+        unchecked {
+            nextRewardCycle = CurrentRewardCycle + 1;            
+        }
 
         RewardCycles[nextRewardCycle].taxed = 0;
         
         CurrentRewardCycle = uint32(nextRewardCycle);
+
+
+        for (uint256 i = 0; i < FEE_TIRES; ++i) {
+            (
+                RewardCycles[nextRewardCycle].stat[i].regularMembers, 
+                RewardCycles[nextRewardCycle].stat[i].boostedMembers
+            ) = 
+                (
+                    RewardCycles[oldRewardCycle].stat[i].regularMembers, 
+                    RewardCycles[oldRewardCycle].stat[i].boostedMembers
+                );
+        }
     }
 
     /*################################# END - CORE LOGIC #################################*/
@@ -515,4 +516,19 @@ contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors {
             }
         }
     }
+
+    //restricted to owner because it can mess up everything 
+    //in cases if user moving reward tire up
+    function ProcessRewardsForUser(address account, uint32 maxRewardId) public onlyOwner {
+        require(maxRewardId <= CurrentRewardCycle, "maxRewardId cannot exceed current reward cycle id");
+
+        (, bool requireUpdate, uint256 rewarded) = _balanceWithRewardsToRewardCycle(account, maxRewardId);
+
+        if (requireUpdate) {
+            _accounts[account].lastRewardId = maxRewardId;
+            if (rewarded != 0)
+                _transferCore(address(this), account, rewarded, true);
+        }
+    }
+     
 }
