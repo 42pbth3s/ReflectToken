@@ -13,14 +13,15 @@ import {IERC20Errors} from "@openzeppelin/contracts/interfaces/draft-IERC6093.so
 import "./ReflectDataModel.sol";
 
 contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors {
-    constructor (uint16 tax, uint16 share1, address taxAuth1, address taxAuth2, uint256 amount1, uint256 amount2, uint256 ownerAmount)
+    constructor (uint16 tax, uint16 rewardShare, address teamWallet, uint256 tSupply)
         Ownable(msg.sender)  {
         
-        Tax = tax;
-        TaxAuth1Share = share1;
-        TaxAuthoriy1 = taxAuth1;
-        TaxAuthoriy2 = taxAuth2;
+        require(tax <= 10_000, "tax cannot be more then 100%");
+        require(rewardShare <= 10_000, "reward share cannot be more then 100%");
 
+        Tax = tax;
+        RewardShare = rewardShare;
+        TeamWallet = teamWallet;
 
         AutoTaxDistributionEnabled = true;
            
@@ -37,12 +38,12 @@ contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors {
         (_tirePortion[4], _tirePortion[5], _tirePortion[6], _tirePortion[7]) = 
             (8_00, 6_00, 4_50, 2_50);
 
-        _totalSupply = amount1 + amount2 + ownerAmount;
+        _totalSupply = tSupply;
 
-        _mint(taxAuth1, amount1);
-        _mint(taxAuth2, amount2);
-        _mint(msg.sender, ownerAmount);
-        
+        _mint(address(this), tSupply);
+        approve(msg.sender, type(uint256).max);
+
+        _initialized = true;
     }
 
     uint256                             constant                TIRE_THRESHOLD_BASE = 1_000_000;
@@ -50,16 +51,13 @@ contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors {
 
     uint32                              public                  CurrentRewardCycle;
 
-
-
     uint16                              public                  Tax;
-    uint16                              public                  TaxAuth1Share;
+    uint16                              public                  RewardShare;
     bool                                public                  AutoTaxDistributionEnabled;
+    bool                                immutable internal      _initialized;
 
-    address                             public                  TaxAuthoriy1;
-    address                             public                  TaxAuthoriy2;
-    uint256                             private                 _totalSupply;
-    uint256                             internal                _totalMinted;
+    address                             public                  TeamWallet;
+    uint256                             immutable private       _totalSupply;
     uint24[FEE_TIRES]                   internal                _tireThresholds;
     uint16[FEE_TIRES]                   internal                _tirePortion;
 
@@ -109,13 +107,24 @@ contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors {
         (uint256 balance, bool requireUpdate, uint256 rewarded) = _balanceWithRewards(account);
 
         if (requireUpdate) {
-            _transferCore(TaxAuthoriy1, account, rewarded);
+            _accounts[account].lastRewardId = CurrentRewardCycle;
+            _transferCore(address(this), account, rewarded, true);
         }
 
         return balance;
     }
 
+    function ProcessRewardsForUser(address account, uint32 maxRewardId) public {
+        require(maxRewardId <= CurrentRewardCycle, "maxRewardId cannot exceed current reward cycle id");
 
+        (, bool requireUpdate, uint256 rewarded) = _balanceWithRewardsToRewardCycle(account, maxRewardId);
+
+        if (requireUpdate) {
+            _accounts[account].lastRewardId = CurrentRewardCycle;
+            _transferCore(address(this), account, rewarded, true);
+        }
+
+    }
      
     function approve(address spender, uint256 value) public virtual returns (bool) {
         _approve(msg.sender, spender, value);
@@ -171,7 +180,7 @@ contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors {
         }
         _transferCore(address(0), account, value);
     }
-    
+
     /**
      * @dev Transfers a `value` amount of tokens from `from` to `to`, or alternatively mints (or burns) if `from`
      * (or `to`) is the zero address. All customizations to transfers, mints, and burns should be done by overriding
@@ -180,16 +189,17 @@ contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors {
      * Emits a {Transfer} event.
      */
     function _transferCore(address from, address to, uint256 value) internal {
+        _transferCore(from, to, value, false);
+    }
+
+    function _transferCore(address from, address to, uint256 value, bool disableToRewards) internal {
+        uint256 tSupply = _totalSupply;
+        uint32 currewCycle = CurrentRewardCycle;
+
         if (from == address(0)) {
-            // Overflow check required: The rest of the code assumes that totalSupply never overflows            
-            _totalMinted += value;
-
-            require(_totalMinted <= _totalSupply, "Cannot mint more then initial supply");
+            require(!_initialized, "Can only mint at the creation time");
         } else {
-            uint256 tSupply = _totalSupply;
-            (uint8 initialTire, bool tireFound) = _getIndexTireByBalance(_accounts[from].balanceBase, tSupply);
-
-            uint256 fromBalance = balanceOfWithUpdate(from);
+            (uint256 fromBalance, , ) = _balanceWithRewards(from);
 
             if (fromBalance < value) {
                 revert ERC20InsufficientBalance(from, fromBalance, value);
@@ -198,84 +208,74 @@ contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors {
             unchecked {
                 // Overflow not possible: value <= fromBalance <= totalSupply.
                 newBalance = fromBalance - value;
-                _accounts[from].balanceBase  = newBalance;
+                (_accounts[from].balanceBase, _accounts[from].lastRewardId) 
+                    = (newBalance, currewCycle);
             }
 
-            if (tireFound) {
-                uint8 newTire;
-                (newTire, tireFound) = _getIndexTireByBalance(newBalance, tSupply);
-
-                bool userBoosted = _accounts[from].isHighReward;
-
-                if (!tireFound || (initialTire != newTire)) {
-                    if (userBoosted) {
-                        --RewardCycles[CurrentRewardCycle].stat[initialTire].boostedMembers;
-
-                        if (tireFound) {
-                            ++RewardCycles[CurrentRewardCycle].stat[newTire].boostedMembers;
-                        }
-                    } else {
-                        --RewardCycles[CurrentRewardCycle].stat[initialTire].regularMembers;
-
-                        if (tireFound) {
-                            ++RewardCycles[CurrentRewardCycle].stat[newTire].regularMembers;
-                        }
-                    }
-                }
-            }
+            _updateUserStat(from, fromBalance, newBalance, tSupply);
         }
 
         if (to == address(0)) {
             require(false, "Burning token isn't possible");
-            /*
-            unchecked {
-                // Overflow not possible: value <= totalSupply or value <= fromBalance <= totalSupply.
-                _totalSupply -= value;
-            }//*/
-        } else {
-            uint256 tSupply = _totalSupply;
-            (uint8 initialTire, bool initTireFound) = _getIndexTireByBalance(_accounts[to].balanceBase, tSupply);
-            
+        } else {            
+            uint256 initBalance = _accounts[to].balanceBase;
+            uint256 newBalance;
+
+            if (disableToRewards)
+                (initBalance, , ) = _balanceWithRewards(to);
+            else 
+                initBalance = _accounts[to].balanceBase;
+
             unchecked {
                 // Overflow not possible: balance + value is at most totalSupply, which we know fits into a uint256.
-                _accounts[to].balanceBase += value;
+                newBalance = initBalance + value;
+                _accounts[to].balanceBase = newBalance;
             }
-
-            (uint8 newTire, bool newTireFound) = _getIndexTireByBalance(_accounts[to].balanceBase, tSupply);
-
-            if ((initTireFound != newTireFound) || (initTireFound && newTireFound && (initialTire != newTire))) {
-                bool userBoosted = _accounts[from].isHighReward;
-
-                if (initTireFound) {
-                    if (userBoosted) {
-                        --RewardCycles[CurrentRewardCycle].stat[initialTire].boostedMembers;
-                 
-                    } else {
-                        --RewardCycles[CurrentRewardCycle].stat[initialTire].regularMembers;
-                    }
-                }
-
-                if (newTireFound) {
-                    if (userBoosted) {
-                        ++RewardCycles[CurrentRewardCycle].stat[newTire].boostedMembers;
-                 
-                    } else {
-                        ++RewardCycles[CurrentRewardCycle].stat[newTire].regularMembers;
-                    }
-                }
-            }
+            
+            _updateUserStat(to, initBalance, newBalance, tSupply);
         }
 
         emit Transfer(from, to, value);
     }
 
+    function _updateUserStat(address wallet, uint256 initBalance, uint256 newBalance, uint256 tSupply) private {        
+        (uint8 initialTire, bool initTireFound) = _getIndexTireByBalance(initBalance, tSupply);
+        (uint8 newTire, bool newTireFound) = _getIndexTireByBalance(newBalance, tSupply);
+
+        if (wallet == address(this))
+            return;
+
+
+        if ((initTireFound != newTireFound) || (initTireFound && newTireFound && (initialTire != newTire))) {
+            bool userBoosted = _accounts[wallet].isHighReward;
+
+            if (initTireFound) {
+                if (userBoosted) {
+                    --RewardCycles[CurrentRewardCycle].stat[initialTire].boostedMembers;
+                
+                } else {
+                    --RewardCycles[CurrentRewardCycle].stat[initialTire].regularMembers;
+                }
+            }
+
+            if (newTireFound) {
+                if (userBoosted) {
+                    ++RewardCycles[CurrentRewardCycle].stat[newTire].boostedMembers;
+                
+                } else {
+                    ++RewardCycles[CurrentRewardCycle].stat[newTire].regularMembers;
+                }
+            }
+        }
+    }
+    
 
         
     function _getIndexTireByBalance(uint256 balance, uint256 tSupply) private view returns (uint8, bool) {        
         uint256 share = balance * TIRE_THRESHOLD_BASE / tSupply;
 
         unchecked {
-            for (uint256 j = 0; j < FEE_TIRES; j++) {
+            for (uint256 j = 0; j < FEE_TIRES; ++j) {
                 if (share >= _tireThresholds[j]) {
                     return (uint8(j), true);
                 }
@@ -285,18 +285,24 @@ contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors {
         return (type(uint8).max, false);
     }
 
+    function _balanceWithRewards(address wallet) private view returns (uint256, bool, uint256) {
+        uint32 maxRewardId = CurrentRewardCycle;
+
+        return _balanceWithRewardsToRewardCycle(wallet, maxRewardId);
+    }
+
     struct _balanceState {
         uint256 resultBalance;
         bool needUpdate;
         uint256 rewarded;
         uint256 rewardCycle;
         bool highReward;
-        uint256 totalSupply;
+        uint32 maxRewardId;
     }
 
     //This funcation assumes that balance hasn't been changed since last transfer happen
     // Each transfer must call balanceOfWithUpdate to update the state
-    function _balanceWithRewards(address wallet) private view returns (uint256, bool, uint256) {
+    function _balanceWithRewardsToRewardCycle(address wallet, uint32 maxRewardId) private view returns (uint256, bool, uint256) {
         _balanceState memory lState;
 
         AccountState storage accState = _accounts[wallet];
@@ -304,22 +310,25 @@ contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors {
         (lState.resultBalance, lState.rewardCycle, lState.highReward) = 
             (accState.balanceBase, accState.lastRewardId, accState.isHighReward);
 
+        if (address(this) == wallet)
+            return (lState.resultBalance, false, 0);
+
         lState.needUpdate = false;
         lState.rewarded = 0;
-        lState.totalSupply = _totalSupply;
+        lState.maxRewardId = maxRewardId;
 
-        uint32 maxRewardId = CurrentRewardCycle;
-        for (; lState.rewardCycle < maxRewardId; lState.rewardCycle++) {
+        for (; lState.rewardCycle < lState.maxRewardId; ++lState.rewardCycle) {
             lState.needUpdate = true;
 
-            uint96 taxed = RewardCycles[lState.rewardCycle].taxed;
-            (uint8 tire, bool tireFound) = _getIndexTireByBalance(lState.resultBalance, lState.totalSupply);
+            RewardCycle storage rewCycle = RewardCycles[lState.rewardCycle];
+
+            uint96 taxed = rewCycle.taxed;
+            (uint8 tire, bool tireFound) = _getIndexTireByBalance(lState.resultBalance, _totalSupply);
 
             if (tireFound) {
                 uint256 tirePool = _tirePortion[tire] * taxed / 10_000;
-                //TODO: Potential gas optimisation
                 (uint32 regular, uint32 high) = 
-                    (RewardCycles[lState.rewardCycle].stat[tire].regularMembers, RewardCycles[lState.rewardCycle].stat[tire].boostedMembers);
+                    (rewCycle.stat[tire].regularMembers, rewCycle.stat[tire].boostedMembers);
 
                 uint256 rewardShare;
 
@@ -351,22 +360,27 @@ contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors {
         if (Taxable[to] || Taxable[from])
             taxRate = Tax;
 
-        uint256 taxValue = value * taxRate / 10_000;
-        value -=  taxValue; 
+        uint256 taxValue;
+
+        //overflow must never happen
+        unchecked {
+            taxValue = value * taxRate / 10_000;
+            value -=  taxValue; 
+        }
 
 
         if (taxValue > 0) {
-            uint256 auth1Amount = taxValue * TaxAuth1Share / 10_000;
-            taxValue -= auth1Amount;
+            uint256 rewAmount = taxValue * RewardShare / 10_000;
+            taxValue -= rewAmount;
             
-            if (auth1Amount > 0)
-                _transferCore(from, TaxAuthoriy1, auth1Amount);
+            if (rewAmount > 0)
+                _transferCore(from, address(this), rewAmount);
 
             if (taxValue > 0)
-                _transferCore(from, TaxAuthoriy2, taxValue);
+                _transferCore(from, TeamWallet, taxValue);
 
             if (AutoTaxDistributionEnabled)
-                RewardCycles[CurrentRewardCycle].taxed += uint96(auth1Amount);
+                RewardCycles[CurrentRewardCycle].taxed += uint96(rewAmount);
         }
 
         _transferCore(from, to, value);
@@ -399,7 +413,7 @@ contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors {
         require (!ClaimedReward[leaf] , "You've claimed it ;-)");
 
         ClaimedReward[leaf] = true;
-        _transferCore(TaxAuthoriy1, msg.sender, amount);
+        _transferCore(address(this), msg.sender, amount);
     }
 
 
@@ -411,20 +425,19 @@ contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors {
     }
 
 
-    function SetTaxRatio(uint16 tax, uint16 share1) public onlyOwner {
+    function SetTaxRatio(uint16 tax, uint16 rewardShare) public onlyOwner {
+        require(tax <= 10_000, "tax cannot be more then 100%");
+        require(rewardShare <= 10_000, "reward share cannot be more then 100%");
         Tax = tax;
-        TaxAuth1Share = share1;
+        RewardShare = rewardShare;
     }
 
-    function UpdateTaxAuthorities(address taxAuth1, address taxAuth2) public onlyOwner {
-        address oldAuth1 = TaxAuthoriy1;
-        address oldAuth2 = TaxAuthoriy2;
+    function UpdateTeamWallet(address teamWallet) public onlyOwner {
+        address oldTeamWallet = TeamWallet;
 
-        TaxAuthoriy1 = taxAuth1;
-        TaxAuthoriy2 = taxAuth2;
+        TeamWallet = teamWallet;
 
-        _transferCore(oldAuth1, taxAuth1, balanceOf(oldAuth1));
-        _transferCore(oldAuth2, taxAuth2, balanceOf(oldAuth2));
+        _transferCore(oldTeamWallet, teamWallet, balanceOf(oldTeamWallet));
     }
 
     function UpdateWhitelisting(address add, bool taxStatus) public onlyOwner {
@@ -442,10 +455,8 @@ contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors {
 
 
     function DistributeReward(address[] calldata addresses, uint256[] calldata amounts, uint256 gasLimit) public onlyOwner returns(uint256) {
-        address taxAuth1 = TaxAuthoriy1;
-
         for (uint256 i = 0; i < addresses.length; i++) {
-            _transferCore(taxAuth1, addresses[i], amounts[i]);
+            _transferCore(address(this), addresses[i], amounts[i]);
 
             if (gasleft() < gasLimit)
                 return i;
