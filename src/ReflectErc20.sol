@@ -214,7 +214,7 @@ contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors {
                     = (newBalance, currewCycle);
             }
 
-            _updateUserStat(from, fromBalance, newBalance, tSupply);
+            _updateWalletStat(from, fromBalance, newBalance, tSupply);
         }
 
         if (to == address(0)) {
@@ -234,13 +234,13 @@ contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors {
                 _accounts[to].balanceBase = newBalance;
             }
             
-            _updateUserStat(to, initBalance, newBalance, tSupply);
+            _updateWalletStat(to, initBalance, newBalance, tSupply);
         }
 
         emit Transfer(from, to, value);
     }
 
-    function _updateUserStat(address wallet, uint256 initBalance, uint256 newBalance, uint256 tSupply) private {
+    function _updateWalletStat(address wallet, uint256 initBalance, uint256 newBalance, uint256 tSupply) private {
         (uint8 initialTire, bool initTireFound) = _getIndexTireByBalance(initBalance, tSupply);
         (uint8 newTire, bool newTireFound) = _getIndexTireByBalance(newBalance, tSupply);
         (bool userBoosted, bool userExcluded) = (_accounts[wallet].isHighReward, _accounts[wallet].excludedFromRewards);
