@@ -15,19 +15,27 @@ contract CounterTest is Test {
     
     ReflectDebug                            public              TokenContract;
 
-    address                                 public              TaxAuth1        = address(uint160(0xAAAA003A601));
-    address                                 public              TaxAuth2        = address(uint160(0xAAAA003A602));
-    address                                 public              Owner           = address(uint160(0xAABBCC0000));
-    address                                 public              NextUserBurner     = address(uint160(0xCC00220000));
+    address                                 public              RewardWallet;
+    address                                 public              TeamWallet        = address(uint160(0xAAAA003A602));
+    address                                 public              Owner             = address(uint160(0xAABBCC0000));
+    address                                 public              NextUserBurner    = address(uint160(0xCC00220000));
+    address                                 public              FundWallet        = address(uint160(0xBBB0000FFFF));
 
 
     function setUp() public {
         //100_00 - 100%
         vm.startPrank(Owner);
-        TokenContract = new ReflectDebug(5_00, 50_00, TaxAuth1, TaxAuth2, 0, 0, 100_000_000 ether);
+        TokenContract = new ReflectDebug(5_00, 50_00, TeamWallet, 100_000_000 ether);
         vm.stopPrank();
 
+        RewardWallet = address(TokenContract);
+
         console.log("                     $REFLECT: %s", address(TokenContract));
+        
+        vm.startPrank(Owner);
+        TokenContract.ExcludeWalletFromRewards(FundWallet);
+        TokenContract.transferFrom(address(TokenContract), FundWallet, 100_000_000 ether);
+        vm.stopPrank();
     }
 
     struct MerkelTree {
@@ -128,12 +136,11 @@ contract CounterTest is Test {
 
     function _fundWallet(address wallet, uint256 amount) private {        
         console.log("Airdropping %s[%d] to %s", _toDecimalString(amount, 18), amount, wallet);
-        vm.startPrank(Owner);        
-
         uint256 oldUserbalance = TokenContract.balanceOf(wallet);
-
         _printWalletBalance(wallet);
 
+
+        vm.startPrank(FundWallet);
         TokenContract.transfer(wallet, amount);
         vm.stopPrank();
 
@@ -370,37 +377,33 @@ contract CounterTest is Test {
     }
 
     function testTaxConfig() public {
-        address newAuth1 = _allocateBurner();
-        address newAuth2 = _allocateBurner();
+        address newTeamWallet = _allocateBurner();
 
-        _fundWallet(TaxAuth1, 12 * 1e18);
-        _fundWallet(TaxAuth2, 34 * 1e18);
+        _fundWallet(TeamWallet, 34 * 1e18);
         
 
         vm.startPrank(Owner);
-        TokenContract.UpdateTaxAuthorities(newAuth1, newAuth2);
+        TokenContract.UpdateTeamWallet(newTeamWallet);
         vm.stopPrank();
 
-        _printWalletBalance(newAuth1);
-        _printWalletBalance(newAuth2);
+        _printWalletBalance(newTeamWallet);
 
-        assertEq(12 * 1e18, TokenContract.balanceOf(newAuth1));
-        assertEq(34 * 1e18, TokenContract.balanceOf(newAuth2));
+        assertEq(34 * 1e18, TokenContract.balanceOf(newTeamWallet));
 
 
         uint16 newTax = 6_00;
-        uint16 newShare1 = 45_00;
+        uint16 newRewardShare = 45_00;
 
         assertNotEq(newTax, TokenContract.Tax(), "tax is same, update the test!");
-        assertNotEq(newShare1, TokenContract.TaxAuth1Share(), "tax share 1 is same, update the test!");
+        assertNotEq(newRewardShare, TokenContract.RewardShare(), "tax share 1 is same, update the test!");
 
 
         vm.startPrank(Owner);
-        TokenContract.SetTaxRatio(newTax, newShare1);
+        TokenContract.SetTaxRatio(newTax, newRewardShare);
         vm.stopPrank();
 
         assertEq(newTax, TokenContract.Tax(), "tax setting ignored");
-        assertEq(newShare1, TokenContract.TaxAuth1Share(), "tax share 1 setting ignored");
+        assertEq(newRewardShare, TokenContract.RewardShare(), "tax share 1 setting ignored");
     }
 
 
@@ -426,13 +429,13 @@ contract CounterTest is Test {
 
         _printWalletBalance(user1);
         _printWalletBalance(taxable);
-        _printWalletBalance(TaxAuth1);
-        _printWalletBalance(TaxAuth2);
+        _printWalletBalance(RewardWallet);
+        _printWalletBalance(TeamWallet);
 
         assertEq(100_0 * 1e18, TokenContract.balanceOf(user1), "user1 balance");
         assertEq( 95_0 * 1e18, TokenContract.balanceOf(taxable), "taxable balance 1");
-        assertEq(  2_5 * 1e18, TokenContract.balanceOf(TaxAuth1), "tax1 balance 1");
-        assertEq(  2_5 * 1e18, TokenContract.balanceOf(TaxAuth2), "tax2 balance 1");
+        assertEq(  2_5 * 1e18, TokenContract.balanceOf(RewardWallet), "tax1 balance 1");
+        assertEq(  2_5 * 1e18, TokenContract.balanceOf(TeamWallet), "tax2 balance 1");
 
         uint96 taxed = TokenContract.RewardCycles(TokenContract.CurrentRewardCycle());
         assertEq(  2_5 * 1e18, taxed, "rew cycle taxed 1");
@@ -445,13 +448,13 @@ contract CounterTest is Test {
         
         _printWalletBalance(user2);
         _printWalletBalance(taxable);
-        _printWalletBalance(TaxAuth1);
-        _printWalletBalance(TaxAuth2);
+        _printWalletBalance(RewardWallet);
+        _printWalletBalance(TeamWallet);
 
         assertEq(100_0 * 1e18, TokenContract.balanceOf(user2), "user2 balance");
         assertEq(190_0 * 1e18, TokenContract.balanceOf(taxable), "taxable balance 2");
-        assertEq(  5_0 * 1e18, TokenContract.balanceOf(TaxAuth1), "tax1 balance 2");
-        assertEq(  5_0 * 1e18, TokenContract.balanceOf(TaxAuth2), "tax2 balance 2");
+        assertEq(  5_0 * 1e18, TokenContract.balanceOf(RewardWallet), "tax1 balance 2");
+        assertEq(  5_0 * 1e18, TokenContract.balanceOf(TeamWallet), "tax2 balance 2");
 
         taxed = TokenContract.RewardCycles(TokenContract.CurrentRewardCycle());
         assertEq(  5_0 * 1e18, taxed, "rew cycle taxed 2");
@@ -467,13 +470,13 @@ contract CounterTest is Test {
         
         _printWalletBalance(taxable);
         _printWalletBalance(wasteWallet);
-        _printWalletBalance(TaxAuth1);
-        _printWalletBalance(TaxAuth2);
+        _printWalletBalance(RewardWallet);
+        _printWalletBalance(TeamWallet);
 
         assertEq( 90_0 * 1e18, TokenContract.balanceOf(taxable), "taxable balance 3");
         assertEq( 95_0 * 1e18, TokenContract.balanceOf(wasteWallet), "waste balance");
-        assertEq(  7_5 * 1e18, TokenContract.balanceOf(TaxAuth1), "tax1 balance 3");
-        assertEq(  7_5 * 1e18, TokenContract.balanceOf(TaxAuth2), "tax2 balance 3");
+        assertEq(  7_5 * 1e18, TokenContract.balanceOf(RewardWallet), "tax1 balance 3");
+        assertEq(  7_5 * 1e18, TokenContract.balanceOf(TeamWallet), "tax2 balance 3");
         
         taxed = TokenContract.RewardCycles(TokenContract.CurrentRewardCycle());
         assertEq(  7_5 * 1e18, taxed, "rew cycle taxed 3");
@@ -487,7 +490,7 @@ contract CounterTest is Test {
 
         vm.startPrank(Owner);
         TokenContract.UpdateWhitelisting(taxable, true);
-        TokenContract.SetTaxRatio(0, TokenContract.TaxAuth1Share());
+        TokenContract.SetTaxRatio(0, TokenContract.RewardShare());
         vm.stopPrank();
 
 
@@ -502,13 +505,13 @@ contract CounterTest is Test {
 
         _printWalletBalance(user1);
         _printWalletBalance(taxable);
-        _printWalletBalance(TaxAuth1);
-        _printWalletBalance(TaxAuth2);
+        _printWalletBalance(RewardWallet);
+        _printWalletBalance(TeamWallet);
 
         assertEq(100_0 * 1e18, TokenContract.balanceOf(user1), "user1 balance");
         assertEq(100_0 * 1e18, TokenContract.balanceOf(taxable), "taxable balance 1");
-        assertEq(    0 * 1e18, TokenContract.balanceOf(TaxAuth1), "tax1 balance 1");
-        assertEq(    0 * 1e18, TokenContract.balanceOf(TaxAuth2), "tax2 balance 1");
+        assertEq(    0 * 1e18, TokenContract.balanceOf(RewardWallet), "tax1 balance 1");
+        assertEq(    0 * 1e18, TokenContract.balanceOf(TeamWallet), "tax2 balance 1");
 
         uint96 taxed = TokenContract.RewardCycles(TokenContract.CurrentRewardCycle());
         assertEq(    0 * 1e18, taxed, "rew cycle taxed 1");
@@ -521,13 +524,13 @@ contract CounterTest is Test {
         
         _printWalletBalance(user2);
         _printWalletBalance(taxable);
-        _printWalletBalance(TaxAuth1);
-        _printWalletBalance(TaxAuth2);
+        _printWalletBalance(RewardWallet);
+        _printWalletBalance(TeamWallet);
 
         assertEq(100_0 * 1e18, TokenContract.balanceOf(user2), "user2 balance");
         assertEq(200_0 * 1e18, TokenContract.balanceOf(taxable), "taxable balance 2");
-        assertEq(    0 * 1e18, TokenContract.balanceOf(TaxAuth1), "tax1 balance 2");
-        assertEq(    0 * 1e18, TokenContract.balanceOf(TaxAuth2), "tax2 balance 2");
+        assertEq(    0 * 1e18, TokenContract.balanceOf(RewardWallet), "tax1 balance 2");
+        assertEq(    0 * 1e18, TokenContract.balanceOf(TeamWallet), "tax2 balance 2");
 
         taxed = TokenContract.RewardCycles(TokenContract.CurrentRewardCycle());
         assertEq(    0 * 1e18, taxed, "rew cycle taxed 2");
@@ -556,13 +559,13 @@ contract CounterTest is Test {
 
         _printWalletBalance(user1);
         _printWalletBalance(taxable);
-        _printWalletBalance(TaxAuth1);
-        _printWalletBalance(TaxAuth2);
+        _printWalletBalance(RewardWallet);
+        _printWalletBalance(TeamWallet);
 
         assertEq(100_0 * 1e18, TokenContract.balanceOf(user1), "user1 balance");
         assertEq( 95_0 * 1e18, TokenContract.balanceOf(taxable), "taxable balance 1");
-        assertEq(    0 * 1e18, TokenContract.balanceOf(TaxAuth1), "tax1 balance 1");
-        assertEq(  5_0 * 1e18, TokenContract.balanceOf(TaxAuth2), "tax2 balance 1");
+        assertEq(    0 * 1e18, TokenContract.balanceOf(RewardWallet), "tax1 balance 1");
+        assertEq(  5_0 * 1e18, TokenContract.balanceOf(TeamWallet), "tax2 balance 1");
 
         uint96 taxed = TokenContract.RewardCycles(TokenContract.CurrentRewardCycle());
         assertEq(    0 * 1e18, taxed, "rew cycle taxed 1");
@@ -575,13 +578,13 @@ contract CounterTest is Test {
         
         _printWalletBalance(user2);
         _printWalletBalance(taxable);
-        _printWalletBalance(TaxAuth1);
-        _printWalletBalance(TaxAuth2);
+        _printWalletBalance(RewardWallet);
+        _printWalletBalance(TeamWallet);
 
         assertEq(100_0 * 1e18, TokenContract.balanceOf(user2), "user2 balance");
         assertEq(190_0 * 1e18, TokenContract.balanceOf(taxable), "taxable balance 2");
-        assertEq(    0 * 1e18, TokenContract.balanceOf(TaxAuth1), "tax1 balance 2");
-        assertEq( 10_0 * 1e18, TokenContract.balanceOf(TaxAuth2), "tax2 balance 2");
+        assertEq(    0 * 1e18, TokenContract.balanceOf(RewardWallet), "tax1 balance 2");
+        assertEq( 10_0 * 1e18, TokenContract.balanceOf(TeamWallet), "tax2 balance 2");
 
         taxed = TokenContract.RewardCycles(TokenContract.CurrentRewardCycle());
         assertEq(    0 * 1e18, taxed, "rew cycle taxed 2");
@@ -611,13 +614,13 @@ contract CounterTest is Test {
 
         _printWalletBalance(user1);
         _printWalletBalance(taxable);
-        _printWalletBalance(TaxAuth1);
-        _printWalletBalance(TaxAuth2);
+        _printWalletBalance(RewardWallet);
+        _printWalletBalance(TeamWallet);
 
         assertEq(100_0 * 1e18, TokenContract.balanceOf(user1), "user1 balance");
         assertEq( 95_0 * 1e18, TokenContract.balanceOf(taxable), "taxable balance 1");
-        assertEq(  5_0 * 1e18, TokenContract.balanceOf(TaxAuth1), "tax1 balance 1");
-        assertEq(    0 * 1e18, TokenContract.balanceOf(TaxAuth2), "tax2 balance 1");
+        assertEq(  5_0 * 1e18, TokenContract.balanceOf(RewardWallet), "tax1 balance 1");
+        assertEq(    0 * 1e18, TokenContract.balanceOf(TeamWallet), "tax2 balance 1");
 
         uint96 taxed = TokenContract.RewardCycles(TokenContract.CurrentRewardCycle());
         assertEq(  5_0 * 1e18, taxed, "rew cycle taxed 1");
@@ -630,13 +633,13 @@ contract CounterTest is Test {
         
         _printWalletBalance(user2);
         _printWalletBalance(taxable);
-        _printWalletBalance(TaxAuth1);
-        _printWalletBalance(TaxAuth2);
+        _printWalletBalance(RewardWallet);
+        _printWalletBalance(TeamWallet);
 
         assertEq(100_0 * 1e18, TokenContract.balanceOf(user2), "user2 balance");
         assertEq(190_0 * 1e18, TokenContract.balanceOf(taxable), "taxable balance 2");
-        assertEq( 10_0 * 1e18, TokenContract.balanceOf(TaxAuth1), "tax1 balance 2");
-        assertEq(    0 * 1e18, TokenContract.balanceOf(TaxAuth2), "tax2 balance 2");
+        assertEq( 10_0 * 1e18, TokenContract.balanceOf(RewardWallet), "tax1 balance 2");
+        assertEq(    0 * 1e18, TokenContract.balanceOf(TeamWallet), "tax2 balance 2");
 
         taxed = TokenContract.RewardCycles(TokenContract.CurrentRewardCycle());
         assertEq( 10_0 * 1e18, taxed, "rew cycle taxed 2");
@@ -728,14 +731,9 @@ contract CounterTest is Test {
             if (lState.tires[i] != type(uint8).max) {
                 RewardCycleStat memory tireStat = TokenContract.GetRewardCycleStat(TokenContract.CurrentRewardCycle(), lState.tires[i]);
 
-                uint256 extraAt0 = 0;
-
-                if (lState.tires[i] == 0) {
-                    extraAt0 = 1;
-                }
-
+      
                 console.log("Tire %d stat: regular: %d, boosted: %d", lState.tires[i], tireStat.regularMembers, tireStat.boostedMembers);
-                assertEq(1 + (i & 1) + extraAt0, tireStat.regularMembers, "reg Membs");
+                assertEq(1 + (i & 1), tireStat.regularMembers, "reg Membs");
                 assertEq(0, tireStat.boostedMembers, "bst Membs");
             }
 
@@ -754,7 +752,7 @@ contract CounterTest is Test {
             RewardCycleStat memory tireStat = TokenContract.GetRewardCycleStat(TokenContract.CurrentRewardCycle(), 0);
 
             console.log("Tire 0 stat: regular: %d, boosted: %d", tireStat.regularMembers, tireStat.boostedMembers);
-            assertEq(3, tireStat.regularMembers, "reg Membs");
+            assertEq(2, tireStat.regularMembers, "reg Membs");
             assertEq(0, tireStat.boostedMembers, "bst Membs");
 
             tireStat = TokenContract.GetRewardCycleStat(TokenContract.CurrentRewardCycle(), 7);
@@ -772,7 +770,7 @@ contract CounterTest is Test {
             RewardCycleStat memory tireStat = TokenContract.GetRewardCycleStat(TokenContract.CurrentRewardCycle(), 0);
 
             console.log("Tire 0 stat: regular: %d, boosted: %d", tireStat.regularMembers, tireStat.boostedMembers);
-            assertEq(3, tireStat.regularMembers, "reg Membs");
+            assertEq(2, tireStat.regularMembers, "reg Membs");
             assertEq(0, tireStat.boostedMembers, "bst Membs");
 
             tireStat = TokenContract.GetRewardCycleStat(TokenContract.CurrentRewardCycle(), 7);
@@ -849,8 +847,8 @@ contract CounterTest is Test {
             _printWalletBalance(lState.users[i]);
         }
 
-        _printWalletBalance(TaxAuth1);
-        assertEq(10 ether, TokenContract.balanceOf(TaxAuth1), "Tax auth 1 balance");
+        _printWalletBalance(RewardWallet);
+        assertEq(10 ether, TokenContract.balanceOf(RewardWallet), "Tax auth 1 balance");
 
         assertEq(0, TokenContract.CurrentRewardCycle(), "reward cycle ind 1");
 
@@ -931,8 +929,8 @@ contract CounterTest is Test {
             _printWalletBalance(lState.users[i]);
         }
 
-        _printWalletBalance(TaxAuth1);
-        assertEq(10 ether, TokenContract.balanceOf(TaxAuth1), "Tax auth 1 balance");
+        _printWalletBalance(RewardWallet);
+        assertEq(10 ether, TokenContract.balanceOf(RewardWallet), "Tax auth 1 balance");
 
         vm.startPrank(Owner);
         TokenContract.LaunchNewRewardCycle();
@@ -978,9 +976,9 @@ contract CounterTest is Test {
         vm.expectRevert(revertExptMsg);
         TokenContract.SetTaxRatio(1,1);
 
-        console.log("UpdateTaxAuthorities");
+        console.log("UpdateTeamWallet");
         vm.expectRevert(revertExptMsg);
-        TokenContract.UpdateTaxAuthorities(address(1), address(1));
+        TokenContract.UpdateTeamWallet(address(1));
 
         console.log("UpdateWhitelisting");
         vm.expectRevert(revertExptMsg);
