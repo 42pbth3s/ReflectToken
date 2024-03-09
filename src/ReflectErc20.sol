@@ -60,6 +60,8 @@ contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors {
     uint256                             immutable private       _totalSupply;
     uint24[FEE_TIERS]                   internal                _tierThresholds;
     uint16[FEE_TIERS]                   internal                _tierPortion;
+    
+    uint256                             public                  Boosted;
 
     mapping(address => AccountState)    internal                _accounts;
     mapping(uint256 => RewardCycle)     public                  RewardCycles;
@@ -479,7 +481,8 @@ contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors {
 
     function BoostWallet(address wallet) public onlyOwner {
         require(!_accounts[wallet].isHighReward, "Account could be boosted only once");
-        //TODO: limit max amount
+        require(Boosted < 10, "No more then 10 users could be boosted");
+        ++Boosted;
 
         _accounts[wallet].isHighReward = true;
 
