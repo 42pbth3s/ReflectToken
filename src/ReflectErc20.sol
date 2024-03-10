@@ -217,9 +217,9 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
                 uint256 newBalance;
 
                 if (disableToRewards)
-                    (initBalance, , ) = _balanceWithRewards(to);
-                else 
                     initBalance = _accounts[to].balanceBase;
+                else 
+                    (initBalance, , ) = _balanceWithRewards(to);
 
                 unchecked {
                     // Overflow not possible: balance + value is at most totalSupply, which we know fits into a uint256.
