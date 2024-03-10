@@ -327,13 +327,12 @@ contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors {
 
             RewardCycle storage rewCycle = RewardCycles[lState.rewardCycle];
 
-            uint96 taxed = rewCycle.taxed;
-
-            uint256 tierPool = _tierPortion[lState.tier] * taxed / 100_00;
-            (uint32 regular, uint32 boosted) = 
-                (rewCycle.stat[lState.tier].regularMembers, rewCycle.stat[lState.tier].boostedMembers);
-
             unchecked {
+                uint96 taxed = rewCycle.taxed;
+                    
+                uint256 tierPool = _tierPortion[lState.tier] * taxed / 100_00;
+                (uint32 regular, uint32 boosted) = 
+                    (rewCycle.stat[lState.tier].regularMembers, rewCycle.stat[lState.tier].boostedMembers);
                 uint256 nominator = (100 - boosted) * 100_000;
                 uint256 denominator = 100 * (regular + boosted);
                 uint256 shareRatio = nominator / denominator;
@@ -342,14 +341,15 @@ contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors {
                     shareRatio += 1_000;
                 } 
 
-
                 uint256 rewardShare = tierPool * shareRatio / 100_000;
 
                 lState.rewarded += rewardShare;
             }
         }
 
-        return (lState.resultBalance + lState.rewarded, lState.needUpdate, lState.rewarded);
+        unchecked {
+            return (lState.resultBalance + lState.rewarded, lState.needUpdate, lState.rewarded);
+        }
     }
 
     function _externalTransferCore(address from, address to, uint256 value) private returns (bool)  {
