@@ -1073,6 +1073,7 @@ contract CounterTest is Test {
         address    taxedWallet;
         uint256[]  oldBalances;
     }
+
     function testMultipleRewardCycleAccounting() public {
         _multiRewardDistroState memory lState;
 
@@ -1229,5 +1230,170 @@ contract CounterTest is Test {
         // (7.5 eth - 23%) + 
         // + (10 eth - 30% - 23%) = 5.775 eth + (10 eth - 53%) = 5.775 eth + 4.7 eth = 10.475 eth
         assertEq(10.475 ether, TokenContract.balanceOf(RewardWallet), "Tax auth 1 balance 2");
+    }
+
+
+    function testMultipleLowTierRewardCycleAccounting() public {
+        _multiRewardDistroState memory lState;
+
+        lState.users = new address[](4);
+        lState.sizes = new uint256[](lState.users.length);
+        lState.oldBalances = new uint256[](lState.users.length);
+
+        lState.taxSrcUsers = new address[](50);
+
+        
+        lState.totalAirdrop = TokenContract.totalSupply();
+
+        for (uint256 i = 0; i < lState.users.length; i++) {
+            lState.users[i] = _allocateBurner();
+        }
+
+        lState.sizes[0] =    (    50 * lState.totalAirdrop) / 100_0000; //last tier
+        lState.sizes[1] =    (    50 * lState.totalAirdrop) / 100_0000;
+        lState.sizes[2] =    (    50 * lState.totalAirdrop) / 100_0000;
+        lState.sizes[3] =    (    50 * lState.totalAirdrop) / 100_0000;
+
+        lState.taxedWallet = _allocateBurner();
+
+        for (uint256 i = 0; i < lState.taxSrcUsers.length; i++) {
+            lState.taxSrcUsers[i] = _allocateBurner();
+        }
+
+        vm.startPrank(Owner);
+        TokenContract.UpdateWhitelisting(lState.taxedWallet, true);
+        vm.stopPrank();
+
+
+        for (uint256 i = 0; i < lState.users.length; i++) {
+            console.log("User: %d", i);
+
+            _fundWallet(lState.users[i], lState.sizes[i]);
+            console.log("++++++++++++++++++++++++ NEXT USER ++++++++++++++++++++++++++");
+        }
+
+        for (uint256 i = 0; i < lState.taxSrcUsers.length; i++) {
+            _fundWallet(lState.taxSrcUsers[i], 100 ether, false);
+        }
+
+        
+        vm.startPrank(Owner);
+        TokenContract.BoostWallet(lState.users[1]);
+        vm.stopPrank();
+
+
+        for(uint256 i = 0; i < 10; i++) {
+            vm.startPrank(lState.taxSrcUsers[i]);
+            TokenContract.transfer(lState.taxedWallet, 10 ether);
+            vm.stopPrank();
+        }
+
+        //taxed reward = 10 ether * 10 * 2.5% = 100 * 2.5% = 2.5 ether
+
+        for (uint256 i = 0; i < lState.oldBalances.length; i++) {
+            lState.oldBalances[i] = TokenContract.balanceOf(lState.users[i]);
+        }
+
+        assertEq(0, TokenContract.CurrentRewardCycle(), "reward cycle ind 1");
+
+        console.log("Reward cycle 1");
+        vm.startPrank(Owner);
+        TokenContract.LaunchNewRewardCycle();
+        vm.stopPrank();
+
+        assertEq(1, TokenContract.CurrentRewardCycle(), "reward cycle ind 2");
+
+        /*/
+        // 2.5 eth * 23% * 24.75% = 0.1423125 ether
+        // 2.5 eth * 23% * 25.75% = 0.1480625 ether
+        assertEq(1423125 * 1e11, TokenContract.balanceOf(lState.users[0]) - lState.oldBalances[0], "assigned reward 0");
+        assertEq(1480625 * 1e11, TokenContract.balanceOf(lState.users[1]) - lState.oldBalances[1], "assigned reward 1");
+        assertEq(1423125 * 1e11, TokenContract.balanceOf(lState.users[2]) - lState.oldBalances[2], "assigned reward 2");
+        assertEq(1423125 * 1e11, TokenContract.balanceOf(lState.users[3]) - lState.oldBalances[3], "assigned reward 3");
+        //*/
+
+
+
+        for(uint256 i = 0; i < 10; i++) {
+            vm.startPrank(lState.taxSrcUsers[i + 10]);
+            TokenContract.transfer(lState.taxedWallet, 20 ether);
+            vm.stopPrank();
+        }
+
+        //taxed reward = 20 ether * 10 * 2.5% = 200 * 2.5% = 5 ether
+ 
+        console.log("Reward cycle 2");
+        vm.startPrank(Owner);
+        TokenContract.LaunchNewRewardCycle();
+        vm.stopPrank();
+
+        assertEq(2, TokenContract.CurrentRewardCycle(), "reward cycle ind 3");
+
+        /*
+        // (2.5 eth + 5 eth) * 23% * 24.75% = 0.4269375 ether
+        // (2.5 eth + 5 eth) * 23% * 25.75% = 0.4441875 ether
+        assertEq(4269375 * 1e11, TokenContract.balanceOf(lState.users[0]) - lState.oldBalances[0], "assigned reward 0");
+        assertEq(4441875 * 1e11, TokenContract.balanceOf(lState.users[1]) - lState.oldBalances[1], "assigned reward 1");
+        assertEq(4269375 * 1e11, TokenContract.balanceOf(lState.users[2]) - lState.oldBalances[2], "assigned reward 2");
+        assertEq(4269375 * 1e11, TokenContract.balanceOf(lState.users[3]) - lState.oldBalances[3], "assigned reward 3");
+        //*/
+        
+        
+        for (uint256 i = 0; i < lState.users.length; i++) {
+            address user = lState.users[i];
+            uint256 gasBefore = gasleft();
+            TokenContract.balanceOfWithUpdate(user);
+            uint256 gasAfter = gasleft();
+
+            console.log("Gas usage by balanceOfWithUpdate (2 rew cycles): %d", gasBefore - gasAfter);
+
+            lState.oldBalances[i] = TokenContract.balanceOf(lState.users[i]);
+        }
+
+        
+        // 7.5 eth - 23% = 5.775 eth
+        //assertEq(5.775 ether, TokenContract.balanceOf(RewardWallet), "Tax auth 1 balance 1");
+
+        for(uint256 i = 0; i < 4; i++) {
+            vm.startPrank(lState.taxSrcUsers[i + 20]);
+            TokenContract.transfer(lState.taxedWallet, 100 ether);
+            vm.stopPrank();
+        }
+
+        //taxed reward = 100 ether * 4 * 2.5% = 100 * 10% = 10 ether
+
+
+        
+        console.log("Reward cycle 3");
+        vm.startPrank(Owner);
+        TokenContract.LaunchNewRewardCycle();
+        vm.stopPrank();
+
+        /*
+        // 10 eth * 30% * 100% = 3 eth
+        // 10 eth * 23% * 33% = 0.759 ether
+        // 10 eth * 23% * 34% = 0.782 ether
+        assertEq(3_000 * 1e15, TokenContract.balanceOf(lState.users[0]) - lState.oldBalances[0], "assigned reward 0");
+        assertEq(  782 * 1e15, TokenContract.balanceOf(lState.users[1]) - lState.oldBalances[1], "assigned reward 1");
+        assertEq(  759 * 1e15, TokenContract.balanceOf(lState.users[2]) - lState.oldBalances[2], "assigned reward 2");
+        assertEq(  759 * 1e15, TokenContract.balanceOf(lState.users[3]) - lState.oldBalances[3], "assigned reward 3");
+        //*/
+
+        
+
+        
+        for (uint256 i = 0; i < lState.users.length; i++) {
+            address user = lState.users[i];
+            uint256 gasBefore = gasleft();
+            TokenContract.balanceOfWithUpdate(user);
+            uint256 gasAfter = gasleft();
+
+            console.log("Gas usage by balanceOfWithUpdate (1 rew cycles): %d", gasBefore - gasAfter);
+            lState.oldBalances[i] = TokenContract.balanceOf(lState.users[i]);
+        }
+
+        // (7.5 eth - 23%) + 
+        // + (10 eth - 30% - 23%) = 5.775 eth + (10 eth - 53%) = 5.775 eth + 4.7 eth = 10.475 eth
+        //assertEq(10.475 ether, TokenContract.balanceOf(RewardWallet), "Tax auth 1 balance 2");
     }
 }

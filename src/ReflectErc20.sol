@@ -212,19 +212,26 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
 
             if (to == address(0)) {
                 require(false, "Burning token isn't possible");
-            } else {            
-                uint256 initBalance = _accounts[to].balanceBase;
+            } else {
                 uint256 newBalance;
+                uint256 initBalance;
 
-                if (disableToRewards)
+                if (disableToRewards) {
                     initBalance = _accounts[to].balanceBase;
-                else 
+                    unchecked {
+                        // Overflow not possible: balance + value is at most totalSupply, which we know fits into a uint256.
+                        newBalance = value + initBalance;                    
+                        _accounts[to].balanceBase= newBalance;
+                    }
+                } else {
                     (initBalance, , ) = _balanceWithRewards(to);
-
-                unchecked {
-                    // Overflow not possible: balance + value is at most totalSupply, which we know fits into a uint256.
-                    newBalance = initBalance + value;
-                    _accounts[to].balanceBase = newBalance;
+                    
+                    unchecked {
+                        // Overflow not possible: balance + value is at most totalSupply, which we know fits into a uint256.
+                        newBalance = value + initBalance;                    
+                        (_accounts[to].balanceBase, _accounts[to].lastRewardId) 
+                            = (newBalance, currewCycle);
+                    }
                 }
                 
                 _updateWalletStat(to, initBalance, newBalance, tSupply);
@@ -234,12 +241,13 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
         }
 
         function _updateWalletStat(address wallet, uint256 initBalance, uint256 newBalance, uint256 tSupply) private {
-            (uint8 initialTier, bool initTierFound) = _getIndexTierByBalance(initBalance, tSupply);
-            (uint8 newTier, bool newTierFound) = _getIndexTierByBalance(newBalance, tSupply);
             (bool userBoosted, bool userExcluded) = (_accounts[wallet].isHighReward, _accounts[wallet].excludedFromRewards);
 
             if ((wallet == address(this)) || userExcluded)
                 return;
+
+            (uint8 initialTier, bool initTierFound) = _getIndexTierByBalance(initBalance, tSupply);
+            (uint8 newTier, bool newTierFound) = _getIndexTierByBalance(newBalance, tSupply);
 
 
             if ((initTierFound != newTierFound) || (initTierFound && newTierFound && (initialTier != newTier))) {
@@ -265,9 +273,45 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
         
 
             
-        function _getIndexTierByBalance(uint256 balance, uint256 tSupply) private view returns (uint8, bool) {        
-            uint256 share = balance * TIER_THRESHOLD_BASE / tSupply;
+        function _getIndexTierByBalance(uint256 balance, uint256 tSupply) private view returns (uint8, bool) {
+            unchecked {
+                uint256 share = balance * TIER_THRESHOLD_BASE / tSupply;
 
+                // using binary tree checks to lower & stable gas for all tires
+                // it takes 3-4 checks to make a decision
+
+                if (share < _tierThresholds[3]) {
+                    if (share < _tierThresholds[6]) {
+                        if (share < _tierThresholds[7])
+                            return (type(uint8).max, false);
+                        else
+                            return (7, true);
+                    } else {
+                        if (share < _tierThresholds[4]) {
+                            if (share < _tierThresholds[5])
+                                return (6, true);
+                            else
+                                return (5, true);
+                        } else
+                            return (4, true);
+                    }
+                } else {
+                    if (share < _tierThresholds[1]) {
+                        if (share < _tierThresholds[2])
+                            return (3, true);
+                        else
+                            return (2, true);
+                    } else {
+                        if (share < _tierThresholds[0]) 
+                            return (1, true);
+                        else
+                            return (0, true);
+                    }
+                }
+            }
+
+            /*
+            //this is old unoptimised version:
             unchecked {
                 for (uint256 j = 0; j < FEE_TIERS; ++j) {
                     if (share >= _tierThresholds[j]) {
@@ -277,6 +321,7 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
             }
 
             return (type(uint8).max, false);
+            //*/
         }
 
         function _balanceWithRewards(address wallet) private view returns (uint256, bool, uint256) {
@@ -327,7 +372,7 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
                     return (lState.resultBalance, lState.rewardCycle < lState.maxRewardId, 0);
             }
 
-            for (; lState.rewardCycle < lState.maxRewardId; ++lState.rewardCycle) {
+            for (; lState.rewardCycle < lState.maxRewardId;) {
                 lState.needUpdate = true;
 
                 RewardCycle storage rewCycle = RewardCycles[lState.rewardCycle];
@@ -335,20 +380,28 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
                 unchecked {
                     uint96 taxed = rewCycle.taxed;
                         
-                    uint256 tierPool = _tierPortion[lState.tier] * taxed / 100_00;
+                    //uint256 tierPool = _tierPortion[lState.tier] * taxed / 100_00;
                     (uint32 regular, uint32 boosted) = 
                         (rewCycle.stat[lState.tier].regularMembers, rewCycle.stat[lState.tier].boostedMembers);
-                    uint256 nominator = (100 - boosted) * 100_000;
+                    /*
+                    //uint256 nominator = (100 - boosted) * 100_000; //(using 2's complaint we can get)
+                                                                     //(101 + ~boosted) * 100_000
                     uint256 denominator = 100 * (regular + boosted);
                     uint256 shareRatio = nominator / denominator;
+                    //*/
+                    uint256 shareRatio = ((101 + ~boosted) * 100_000) / ( (regular + boosted) * 100);
 
                     if (lState.highReward) {
                         shareRatio += 1_000;
                     } 
 
-                    uint256 rewardShare = tierPool * shareRatio / 100_000;
+                    //uint256 rewardShare = tierPool * shareRatio / 100_000;
 
-                    lState.rewarded += rewardShare;
+                    lState.rewarded +=  shareRatio * (_tierPortion[lState.tier] * taxed / 100_00) / 100_000;
+                }
+
+                unchecked {
+                    ++lState.rewardCycle;
                 }
             }
 
