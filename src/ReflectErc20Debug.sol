@@ -32,4 +32,13 @@ contract ReflectDebug is Reflect {
     function GetRewardCycleStat(uint256 rewcycle, uint256 tier) public view returns (RewardCycleStat memory) {
         return RewardCycles[rewcycle].stat[tier];
     }
+
+    
+    function _wethErc20() internal override pure returns(IERC20) {
+        return IERC20(address(0));
+    }
+
+    function _uniV2Factory() internal override pure returns(IUniswapV2Factory) {
+        return IUniswapV2Factory(address(0));
+    }
 }

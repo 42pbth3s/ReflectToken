@@ -9,10 +9,12 @@ import {MerkleProof} from "@openzeppelin/contracts/utils/cryptography/MerkleProo
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {IERC20Errors} from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
+import {IUniswapV2Pair} from "v2-core/interfaces/IUniswapV2Pair.sol";
+import {IUniswapV2Factory} from "v2-core/interfaces/IUniswapV2Factory.sol";
 
 import "./ReflectDataModel.sol";
 
-contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors {
+abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors {
     constructor (uint16 tax, uint16 rewardShare, address teamWallet, uint256 tSupply)
         Ownable(msg.sender)  {
         
@@ -100,323 +102,327 @@ contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors {
 
     /********************************** CORE LOGIC **********************************/
 
-    function balanceOf(address account) public view returns (uint256) {
-        (uint256 balance, ,) = _balanceWithRewards(account);
-        return balance;
-    }
-
-    function balanceOfWithUpdate(address account) public returns (uint256) {
-        (uint256 balance, bool requireUpdate, uint256 rewarded) = _balanceWithRewards(account);
-
-        if (requireUpdate) {
-            _accounts[account].lastRewardId = CurrentRewardCycle;
-            if (rewarded != 0)
-                _transferCore(address(this), account, rewarded, true);
-        }
-
-        return balance;
-    }
-    function approve(address spender, uint256 value) public virtual returns (bool) {
-        _approve(msg.sender, spender, value);
-        return true;
-    }
-
-    
-    function transfer(address to, uint256 value) public override returns (bool) {
-        return _externalTransferCore(msg.sender, to, value);
-    }
-
-    function transferFrom(address from, address to, uint256 value) public override returns (bool)  {
-        _spendAllowance(from, msg.sender, value);
-
-        return _externalTransferCore(from, to, value);
-    }
-
-
-    //++++++++++++++++++++++++++++++++ PRIVATE +++++++++++++++++++++
-
-    function _approve(address owner, address spender, uint256 value) internal {
-        _approve(owner, spender, value, true);
-    }
-
-    function _approve(address owner, address spender, uint256 value, bool emitEvent) internal virtual {
-        if (owner == address(0)) {
-            revert ERC20InvalidApprover(address(0));
-        }
-        if (spender == address(0)) {
-            revert ERC20InvalidSpender(address(0));
-        }
-        _allowances[owner][spender] = value;
-        if (emitEvent) {
-            emit Approval(owner, spender, value);
-        }
-    }
-
-    function _spendAllowance(address owner, address spender, uint256 value) internal virtual {
-        uint256 currentAllowance = allowance(owner, spender);
-        if (currentAllowance != type(uint256).max) {
-            if (currentAllowance < value) {
-                revert ERC20InsufficientAllowance(spender, currentAllowance, value);
-            }
-            unchecked {
-                _approve(owner, spender, currentAllowance - value, false);
-            }
-        }
-    }
-
-    function _mint(address account, uint256 value) internal {
-        if (account == address(0)) {
-            revert ERC20InvalidReceiver(address(0));
-        }
-        _transferCore(address(0), account, value);
-    }
-
-    /**
-     * @dev Transfers a `value` amount of tokens from `from` to `to`, or alternatively mints (or burns) if `from`
-     * (or `to`) is the zero address. All customizations to transfers, mints, and burns should be done by overriding
-     * this function.
-     *
-     * Emits a {Transfer} event.
-     */
-    function _transferCore(address from, address to, uint256 value) internal {
-        _transferCore(from, to, value, false);
-    }
-
-    function _transferCore(address from, address to, uint256 value, bool disableToRewards) internal {
-        uint256 tSupply = _totalSupply;
-        uint32 currewCycle = CurrentRewardCycle;
-
-        if (from == address(0)) {
-            require(!_initialized, "Can only mint at the creation time");
-        } else {
-            (uint256 fromBalance, , ) = _balanceWithRewards(from);
-
-            if (fromBalance < value) {
-                revert ERC20InsufficientBalance(from, fromBalance, value);
-            }
-            uint256 newBalance;
-            unchecked {
-                // Overflow not possible: value <= fromBalance <= totalSupply.
-                newBalance = fromBalance - value;
-                (_accounts[from].balanceBase, _accounts[from].lastRewardId) 
-                    = (newBalance, currewCycle);
+            function balanceOf(address account) public view returns (uint256) {
+                (uint256 balance, ,) = _balanceWithRewards(account);
+                return balance;
             }
 
-            _updateWalletStat(from, fromBalance, newBalance, tSupply);
-        }
+            function balanceOfWithUpdate(address account) public returns (uint256) {
+                (uint256 balance, bool requireUpdate, uint256 rewarded) = _balanceWithRewards(account);
 
-        if (to == address(0)) {
-            require(false, "Burning token isn't possible");
-        } else {            
-            uint256 initBalance = _accounts[to].balanceBase;
-            uint256 newBalance;
+                if (requireUpdate) {
+                    _accounts[account].lastRewardId = CurrentRewardCycle;
+                    if (rewarded != 0)
+                        _transferCore(address(this), account, rewarded, true);
+                }
 
-            if (disableToRewards)
-                (initBalance, , ) = _balanceWithRewards(to);
-            else 
-                initBalance = _accounts[to].balanceBase;
-
-            unchecked {
-                // Overflow not possible: balance + value is at most totalSupply, which we know fits into a uint256.
-                newBalance = initBalance + value;
-                _accounts[to].balanceBase = newBalance;
+                return balance;
             }
+            function approve(address spender, uint256 value) public virtual returns (bool) {
+                _approve(msg.sender, spender, value);
+                return true;
+            }
+
             
-            _updateWalletStat(to, initBalance, newBalance, tSupply);
+            function transfer(address to, uint256 value) public override returns (bool) {
+                return _externalTransferCore(msg.sender, to, value);
+            }
+
+            function transferFrom(address from, address to, uint256 value) public override returns (bool)  {
+                _spendAllowance(from, msg.sender, value);
+
+                return _externalTransferCore(from, to, value);
+            }
+
+
+        //++++++++++++++++++++++++++++++++ PRIVATE +++++++++++++++++++++
+
+
+
+
+        function _approve(address owner, address spender, uint256 value) internal {
+            _approve(owner, spender, value, true);
         }
 
-        emit Transfer(from, to, value);
-    }
+        function _approve(address owner, address spender, uint256 value, bool emitEvent) internal virtual {
+            if (owner == address(0)) {
+                revert ERC20InvalidApprover(address(0));
+            }
+            if (spender == address(0)) {
+                revert ERC20InvalidSpender(address(0));
+            }
+            _allowances[owner][spender] = value;
+            if (emitEvent) {
+                emit Approval(owner, spender, value);
+            }
+        }
 
-    function _updateWalletStat(address wallet, uint256 initBalance, uint256 newBalance, uint256 tSupply) private {
-        (uint8 initialTier, bool initTierFound) = _getIndexTierByBalance(initBalance, tSupply);
-        (uint8 newTier, bool newTierFound) = _getIndexTierByBalance(newBalance, tSupply);
-        (bool userBoosted, bool userExcluded) = (_accounts[wallet].isHighReward, _accounts[wallet].excludedFromRewards);
+        function _spendAllowance(address owner, address spender, uint256 value) internal virtual {
+            uint256 currentAllowance = allowance(owner, spender);
+            if (currentAllowance != type(uint256).max) {
+                if (currentAllowance < value) {
+                    revert ERC20InsufficientAllowance(spender, currentAllowance, value);
+                }
+                unchecked {
+                    _approve(owner, spender, currentAllowance - value, false);
+                }
+            }
+        }
 
-        if ((wallet == address(this)) || userExcluded)
-            return;
+        function _mint(address account, uint256 value) internal {
+            if (account == address(0)) {
+                revert ERC20InvalidReceiver(address(0));
+            }
+            _transferCore(address(0), account, value);
+        }
 
+        /**
+        * @dev Transfers a `value` amount of tokens from `from` to `to`, or alternatively mints (or burns) if `from`
+        * (or `to`) is the zero address. All customizations to transfers, mints, and burns should be done by overriding
+        * this function.
+        *
+        * Emits a {Transfer} event.
+        */
+        function _transferCore(address from, address to, uint256 value) internal {
+            _transferCore(from, to, value, false);
+        }
 
-        if ((initTierFound != newTierFound) || (initTierFound && newTierFound && (initialTier != newTier))) {
-            if (initTierFound) {
-                if (userBoosted) {
-                    --RewardCycles[CurrentRewardCycle].stat[initialTier].boostedMembers;
+        function _transferCore(address from, address to, uint256 value, bool disableToRewards) internal {
+            uint256 tSupply = _totalSupply;
+            uint32 currewCycle = CurrentRewardCycle;
+
+            if (from == address(0)) {
+                require(!_initialized, "Can only mint at the creation time");
+            } else {
+                (uint256 fromBalance, , ) = _balanceWithRewards(from);
+
+                if (fromBalance < value) {
+                    revert ERC20InsufficientBalance(from, fromBalance, value);
+                }
+                uint256 newBalance;
+                unchecked {
+                    // Overflow not possible: value <= fromBalance <= totalSupply.
+                    newBalance = fromBalance - value;
+                    (_accounts[from].balanceBase, _accounts[from].lastRewardId) 
+                        = (newBalance, currewCycle);
+                }
+
+                _updateWalletStat(from, fromBalance, newBalance, tSupply);
+            }
+
+            if (to == address(0)) {
+                require(false, "Burning token isn't possible");
+            } else {            
+                uint256 initBalance = _accounts[to].balanceBase;
+                uint256 newBalance;
+
+                if (disableToRewards)
+                    (initBalance, , ) = _balanceWithRewards(to);
+                else 
+                    initBalance = _accounts[to].balanceBase;
+
+                unchecked {
+                    // Overflow not possible: balance + value is at most totalSupply, which we know fits into a uint256.
+                    newBalance = initBalance + value;
+                    _accounts[to].balanceBase = newBalance;
+                }
                 
-                } else {
-                    --RewardCycles[CurrentRewardCycle].stat[initialTier].regularMembers;
-                }
+                _updateWalletStat(to, initBalance, newBalance, tSupply);
             }
 
-            if (newTierFound) {
-                if (userBoosted) {
-                    ++RewardCycles[CurrentRewardCycle].stat[newTier].boostedMembers;
-                
-                } else {
-                    ++RewardCycles[CurrentRewardCycle].stat[newTier].regularMembers;
-                }
-            }
-        }
-    }
-    
-
-        
-    function _getIndexTierByBalance(uint256 balance, uint256 tSupply) private view returns (uint8, bool) {        
-        uint256 share = balance * TIER_THRESHOLD_BASE / tSupply;
-
-        unchecked {
-            for (uint256 j = 0; j < FEE_TIERS; ++j) {
-                if (share >= _tierThresholds[j]) {
-                    return (uint8(j), true);
-                }
-            }
+            emit Transfer(from, to, value);
         }
 
-        return (type(uint8).max, false);
-    }
+        function _updateWalletStat(address wallet, uint256 initBalance, uint256 newBalance, uint256 tSupply) private {
+            (uint8 initialTier, bool initTierFound) = _getIndexTierByBalance(initBalance, tSupply);
+            (uint8 newTier, bool newTierFound) = _getIndexTierByBalance(newBalance, tSupply);
+            (bool userBoosted, bool userExcluded) = (_accounts[wallet].isHighReward, _accounts[wallet].excludedFromRewards);
 
-    function _balanceWithRewards(address wallet) private view returns (uint256, bool, uint256) {
-        uint32 maxRewardId = CurrentRewardCycle;
+            if ((wallet == address(this)) || userExcluded)
+                return;
 
-        return _balanceWithRewardsToRewardCycle(wallet, maxRewardId);
-    }
 
-    struct _balanceState {
-        uint256 resultBalance;
-        bool needUpdate;
-        uint256 rewarded;
-        uint256 rewardCycle;
-        bool highReward;
-        uint32 maxRewardId;
-        uint8 tier;
-    }
-
-    //This funcation assumes that balance hasn't been changed since last transfer happen
-    // Each transfer must call balanceOfWithUpdate to update the state
-    function _balanceWithRewardsToRewardCycle(address wallet, uint32 maxRewardId) private view returns (uint256, bool, uint256) {
-        _balanceState memory lState;
-
-        AccountState storage accState = _accounts[wallet];
-
-        {
-            bool excluded;
-            (lState.resultBalance, lState.rewardCycle, lState.highReward, excluded) = 
-                (accState.balanceBase, accState.lastRewardId, accState.isHighReward, accState.excludedFromRewards);
-
-            if ((address(this) == wallet) || excluded)
-                return (lState.resultBalance, false, 0);
-        }
-
-        lState.needUpdate = false;
-        lState.rewarded = 0;
-        lState.maxRewardId = maxRewardId;
-
-        {
-            bool tierFound;
-            (lState.tier, tierFound) = _getIndexTierByBalance(lState.resultBalance, _totalSupply);
-
-            //No rewards with given balance
-            //just return balance as it is and update based on lastRewardId
-            //that avoids pointless looping through all cycles and wasting gas
-
-            if (!tierFound)
-                return (lState.resultBalance, lState.rewardCycle < lState.maxRewardId, 0);
-        }
-
-        for (; lState.rewardCycle < lState.maxRewardId; ++lState.rewardCycle) {
-            lState.needUpdate = true;
-
-            RewardCycle storage rewCycle = RewardCycles[lState.rewardCycle];
-
-            unchecked {
-                uint96 taxed = rewCycle.taxed;
+            if ((initTierFound != newTierFound) || (initTierFound && newTierFound && (initialTier != newTier))) {
+                if (initTierFound) {
+                    if (userBoosted) {
+                        --RewardCycles[CurrentRewardCycle].stat[initialTier].boostedMembers;
                     
-                uint256 tierPool = _tierPortion[lState.tier] * taxed / 100_00;
-                (uint32 regular, uint32 boosted) = 
-                    (rewCycle.stat[lState.tier].regularMembers, rewCycle.stat[lState.tier].boostedMembers);
-                uint256 nominator = (100 - boosted) * 100_000;
-                uint256 denominator = 100 * (regular + boosted);
-                uint256 shareRatio = nominator / denominator;
+                    } else {
+                        --RewardCycles[CurrentRewardCycle].stat[initialTier].regularMembers;
+                    }
+                }
 
-                if (lState.highReward) {
-                    shareRatio += 1_000;
-                } 
+                if (newTierFound) {
+                    if (userBoosted) {
+                        ++RewardCycles[CurrentRewardCycle].stat[newTier].boostedMembers;
+                    
+                    } else {
+                        ++RewardCycles[CurrentRewardCycle].stat[newTier].regularMembers;
+                    }
+                }
+            }
+        }
+        
 
-                uint256 rewardShare = tierPool * shareRatio / 100_000;
+            
+        function _getIndexTierByBalance(uint256 balance, uint256 tSupply) private view returns (uint8, bool) {        
+            uint256 share = balance * TIER_THRESHOLD_BASE / tSupply;
 
-                lState.rewarded += rewardShare;
+            unchecked {
+                for (uint256 j = 0; j < FEE_TIERS; ++j) {
+                    if (share >= _tierThresholds[j]) {
+                        return (uint8(j), true);
+                    }
+                }
+            }
+
+            return (type(uint8).max, false);
+        }
+
+        function _balanceWithRewards(address wallet) private view returns (uint256, bool, uint256) {
+            uint32 maxRewardId = CurrentRewardCycle;
+
+            return _balanceWithRewardsToRewardCycle(wallet, maxRewardId);
+        }
+
+        struct _balanceState {
+            uint256 resultBalance;
+            bool needUpdate;
+            uint256 rewarded;
+            uint256 rewardCycle;
+            bool highReward;
+            uint32 maxRewardId;
+            uint8 tier;
+        }
+
+        //This funcation assumes that balance hasn't been changed since last transfer happen
+        // Each transfer must call balanceOfWithUpdate to update the state
+        function _balanceWithRewardsToRewardCycle(address wallet, uint32 maxRewardId) private view returns (uint256, bool, uint256) {
+            _balanceState memory lState;
+
+            AccountState storage accState = _accounts[wallet];
+
+            {
+                bool excluded;
+                (lState.resultBalance, lState.rewardCycle, lState.highReward, excluded) = 
+                    (accState.balanceBase, accState.lastRewardId, accState.isHighReward, accState.excludedFromRewards);
+
+                if ((address(this) == wallet) || excluded)
+                    return (lState.resultBalance, false, 0);
+            }
+
+            lState.needUpdate = false;
+            lState.rewarded = 0;
+            lState.maxRewardId = maxRewardId;
+
+            {
+                bool tierFound;
+                (lState.tier, tierFound) = _getIndexTierByBalance(lState.resultBalance, _totalSupply);
+
+                //No rewards with given balance
+                //just return balance as it is and update based on lastRewardId
+                //that avoids pointless looping through all cycles and wasting gas
+
+                if (!tierFound)
+                    return (lState.resultBalance, lState.rewardCycle < lState.maxRewardId, 0);
+            }
+
+            for (; lState.rewardCycle < lState.maxRewardId; ++lState.rewardCycle) {
+                lState.needUpdate = true;
+
+                RewardCycle storage rewCycle = RewardCycles[lState.rewardCycle];
+
+                unchecked {
+                    uint96 taxed = rewCycle.taxed;
+                        
+                    uint256 tierPool = _tierPortion[lState.tier] * taxed / 100_00;
+                    (uint32 regular, uint32 boosted) = 
+                        (rewCycle.stat[lState.tier].regularMembers, rewCycle.stat[lState.tier].boostedMembers);
+                    uint256 nominator = (100 - boosted) * 100_000;
+                    uint256 denominator = 100 * (regular + boosted);
+                    uint256 shareRatio = nominator / denominator;
+
+                    if (lState.highReward) {
+                        shareRatio += 1_000;
+                    } 
+
+                    uint256 rewardShare = tierPool * shareRatio / 100_000;
+
+                    lState.rewarded += rewardShare;
+                }
+            }
+
+            unchecked {
+                return (lState.resultBalance + lState.rewarded, lState.needUpdate, lState.rewarded);
             }
         }
 
-        unchecked {
-            return (lState.resultBalance + lState.rewarded, lState.needUpdate, lState.rewarded);
+        function _externalTransferCore(address from, address to, uint256 value) private returns (bool)  {
+            uint256 taxRate = 0;
+
+            if (Taxable[to] || Taxable[from])
+                taxRate = Tax;
+
+            uint256 taxValue;
+
+            //overflow must never happen
+            unchecked {
+                taxValue = value * taxRate / 10_000;
+                value -=  taxValue; 
+            }
+
+
+            if (taxValue > 0) {
+                uint256 rewAmount = taxValue * RewardShare / 10_000;
+                taxValue -= rewAmount;
+                
+                if (rewAmount > 0)
+                    _transferCore(from, address(this), rewAmount);
+
+                if (taxValue > 0)
+                    _transferCore(from, TeamWallet, taxValue);
+
+                if (AutoTaxDistributionEnabled)
+                    RewardCycles[CurrentRewardCycle].taxed += uint96(rewAmount);
+            }
+
+            _transferCore(from, to, value);
+
+            //Here RewardCycles can be be closed automaticlly
+            //Just by uncommenting line below
+            //newRewardCycle();
+
+            return true;
         }
-    }
 
-    function _externalTransferCore(address from, address to, uint256 value) private returns (bool)  {
-        uint256 taxRate = 0;
+        function _newRewardCycle() private {
+            uint256 oldRewardCycle = CurrentRewardCycle;
+            uint256 nextRewardCycle;
+            unchecked {
+                nextRewardCycle = CurrentRewardCycle + 1;            
+            }
 
-        if (Taxable[to] || Taxable[from])
-            taxRate = Tax;
-
-        uint256 taxValue;
-
-        //overflow must never happen
-        unchecked {
-            taxValue = value * taxRate / 10_000;
-            value -=  taxValue; 
-        }
-
-
-        if (taxValue > 0) {
-            uint256 rewAmount = taxValue * RewardShare / 10_000;
-            taxValue -= rewAmount;
+            RewardCycles[nextRewardCycle].taxed = 0;
             
-            if (rewAmount > 0)
-                _transferCore(from, address(this), rewAmount);
-
-            if (taxValue > 0)
-                _transferCore(from, TeamWallet, taxValue);
-
-            if (AutoTaxDistributionEnabled)
-                RewardCycles[CurrentRewardCycle].taxed += uint96(rewAmount);
-        }
-
-        _transferCore(from, to, value);
-
-        //Here RewardCycles can be be closed automaticlly
-        //Just by uncommenting line below
-        //newRewardCycle();
-
-        return true;
-    }
-
-    function _newRewardCycle() private {
-        uint256 oldRewardCycle = CurrentRewardCycle;
-        uint256 nextRewardCycle;
-        unchecked {
-            nextRewardCycle = CurrentRewardCycle + 1;            
-        }
-
-        RewardCycles[nextRewardCycle].taxed = 0;
-        
-        CurrentRewardCycle = uint32(nextRewardCycle);
+            CurrentRewardCycle = uint32(nextRewardCycle);
 
 
-        for (uint256 i = 0; i < FEE_TIERS; ++i) {
-            (
-                RewardCycles[nextRewardCycle].stat[i].regularMembers, 
-                RewardCycles[nextRewardCycle].stat[i].boostedMembers
-            ) = 
+            for (uint256 i = 0; i < FEE_TIERS; ++i) {
                 (
-                    RewardCycles[oldRewardCycle].stat[i].regularMembers, 
-                    RewardCycles[oldRewardCycle].stat[i].boostedMembers
-                );
+                    RewardCycles[nextRewardCycle].stat[i].regularMembers, 
+                    RewardCycles[nextRewardCycle].stat[i].boostedMembers
+                ) = 
+                    (
+                        RewardCycles[oldRewardCycle].stat[i].regularMembers, 
+                        RewardCycles[oldRewardCycle].stat[i].boostedMembers
+                    );
+            }
         }
-    }
 
     /*################################# END - CORE LOGIC #################################*/
 
-
+    function _wethErc20() internal virtual view returns(IERC20);
+    function _uniV2Factory() internal virtual view returns(IUniswapV2Factory);
 
     function ClaimRewardWithProof(bytes32 root, bytes32[] calldata proof, uint256 amount) public {
         require(RewardRoots[root], "Unrecognized reward");
@@ -430,7 +436,20 @@ contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors {
         _transferCore(address(this), msg.sender, amount);
     }
 
+    function LaunchUniV2Pool() public onlyOwner returns(address) {
+        IUniswapV2Pair pair = IUniswapV2Pair(_uniV2Factory().createPair(address(_wethErc20()), address(this)));
 
+        //We can have total supply only once, so second time it must crash
+        _externalTransferCore(address(this), address(pair), _totalSupply);
+        _wethErc20().transfer(address(pair), _wethErc20().balanceOf(address(this)));
+
+        pair.mint(address(this));
+        pair.approve(msg.sender, type(uint256).max);
+
+        Taxable[address(pair)] = true;
+
+        return address(pair);
+    }
 
     // This is one of 2 options of how launch reward cycle;
     // Another one is to do it at each transfer
