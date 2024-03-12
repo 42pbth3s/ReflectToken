@@ -5,8 +5,8 @@ import "./ReflectErc20.sol";
 import "./ReflectDataModel.sol";
 
 contract ReflectErc20OnMainnet is Reflect {
-    constructor (uint16 tax, uint16 rewardShare, address teamWallet, uint256 tSupply) 
-        Reflect(tax, rewardShare, teamWallet, tSupply)
+    constructor (address teamWallet, uint256 tSupply) 
+        Reflect(teamWallet, tSupply)
     {
 
     }
@@ -18,5 +18,12 @@ contract ReflectErc20OnMainnet is Reflect {
 
     function _uniV2Factory() internal override pure returns(IUniswapV2Factory) {
         return IUniswapV2Factory(0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f);
+    }
+
+    function _regularTax() internal override pure returns(uint256) {
+        return 5_00;
+    }
+    function _highTax() internal override pure returns(uint256) {
+        return 10_00;
     }
 }

@@ -5,27 +5,27 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 
 import {MerkleProof} from "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
+import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {IERC20Errors} from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
+
 import {IUniswapV2Pair} from "v2-core/interfaces/IUniswapV2Pair.sol";
 import {IUniswapV2Factory} from "v2-core/interfaces/IUniswapV2Factory.sol";
 
 import "./ReflectDataModel.sol";
 
 abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors {
-    constructor (uint16 tax, uint16 rewardShare, address teamWallet, uint256 tSupply)
+    using EnumerableSet for EnumerableSet.AddressSet;
+
+    constructor (address teamWallet, uint256 tSupply)
         Ownable(msg.sender)  {
         
-        require(tax <= 10_000, "tax cannot be more then 100%");
-        require(rewardShare <= 10_000, "reward share cannot be more then 100%");
+        require(_regularTax() <= BASE_POINT, "regular tax cannot be more then 100%");
+        require(_highTax() <= BASE_POINT, "high tax cannot be more then 100%");
 
-        Tax = tax;
-        RewardShare = rewardShare;
         TeamWallet = teamWallet;
-
-        AutoTaxDistributionEnabled = true;
            
         (_tierThresholds[0], _tierThresholds[1], _tierThresholds[2], _tierThresholds[3])=
             (1_0000, 7000, 3000, 900);
@@ -48,17 +48,23 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
         _initialized = true;
     }
 
-    uint256                             constant                TIER_THRESHOLD_BASE = 1_000_000;
+    uint256                             constant                TIER_THRESHOLD_BASE = 100_0000;
+    uint256                             constant                BASE_POINT = 100_00;
+    uint256                             constant                BASE_POINT_TENS = 100_000;
 
-
+    // 32 + 8 + 160 = 200 bits
+    // 
     uint32                              public                  CurrentRewardCycle;
+    bool                                public                  DexReflectIsToken1;
+    IUniswapV2Pair                      public                  DEX;
 
-    uint16                              public                  Tax;
-    uint16                              public                  RewardShare;
-    bool                                public                  AutoTaxDistributionEnabled;
-    bool                                immutable internal      _initialized;
-
+    //160 bits
     address                             public                  TeamWallet;
+
+    uint256                             public                  StdTaxBlockInv;
+
+
+    bool                                immutable internal      _initialized;
     uint256                             immutable private       _totalSupply;
     uint24[FEE_TIERS]                   internal                _tierThresholds;
     uint16[FEE_TIERS]                   internal                _tierPortion;
@@ -74,6 +80,15 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
     
     //mapping(address account => uint256) internal                _balances;
     mapping(address account => mapping(address spender => uint256)) internal _allowances;
+
+    /********************************** DEPENDENCY INJECTIONS **********************************/
+        function _wethErc20() internal virtual view returns(IERC20);
+        function _uniV2Factory() internal virtual view returns(IUniswapV2Factory);
+        function _regularTax() internal virtual view returns(uint256);
+        function _highTax() internal virtual view returns(uint256);
+
+    /*################################# END - DEPENDENCY INJECTIONS #################################*/
+
 
     /********************************** GENERIC VIEW FUNCTIONs **********************************/
         function name() public pure returns (string memory) {
@@ -101,23 +116,11 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
 
 
     /********************************** CORE LOGIC **********************************/
-
             function balanceOf(address account) public view returns (uint256) {
-                (uint256 balance, ,) = _balanceWithRewards(account);
-                return balance;
+                return _accounts[account].balance;
             }
 
-            function balanceOfWithUpdate(address account) public returns (uint256) {
-                (uint256 balance, bool requireUpdate, uint256 rewarded) = _balanceWithRewards(account);
 
-                if (requireUpdate) {
-                    _accounts[account].lastRewardId = CurrentRewardCycle;
-                    if (rewarded != 0)
-                        _transferCore(address(this), account, rewarded, true);
-                }
-
-                return balance;
-            }
             function approve(address spender, uint256 value) public virtual returns (bool) {
                 _approve(msg.sender, spender, value);
                 return true;
@@ -183,18 +186,15 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
         *
         * Emits a {Transfer} event.
         */
+        // internal (core) version of transfer
         function _transferCore(address from, address to, uint256 value) internal {
-            _transferCore(from, to, value, false);
-        }
-
-        function _transferCore(address from, address to, uint256 value, bool disableToRewards) internal {
+            //cache for gas saving
             uint256 tSupply = _totalSupply;
-            uint32 currewCycle = CurrentRewardCycle;
 
             if (from == address(0)) {
                 require(!_initialized, "Can only mint at the creation time");
             } else {
-                (uint256 fromBalance, , ) = _balanceWithRewards(from);
+                uint256 fromBalance = _accounts[from].balance;
 
                 if (fromBalance < value) {
                     revert ERC20InsufficientBalance(from, fromBalance, value);
@@ -203,10 +203,11 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
                 unchecked {
                     // Overflow not possible: value <= fromBalance <= totalSupply.
                     newBalance = fromBalance - value;
-                    (_accounts[from].balanceBase, _accounts[from].lastRewardId) 
-                        = (newBalance, currewCycle);
+                    //updating balance and reward cycle
+                    _accounts[from].balance = newBalance;
                 }
 
+                //afterwards we need to refresh user stats
                 _updateWalletStat(from, fromBalance, newBalance, tSupply);
             }
 
@@ -216,24 +217,14 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
                 uint256 newBalance;
                 uint256 initBalance;
 
-                if (disableToRewards) {
-                    initBalance = _accounts[to].balanceBase;
-                    unchecked {
-                        // Overflow not possible: balance + value is at most totalSupply, which we know fits into a uint256.
-                        newBalance = value + initBalance;                    
-                        _accounts[to].balanceBase= newBalance;
-                    }
-                } else {
-                    (initBalance, , ) = _balanceWithRewards(to);
-                    
-                    unchecked {
-                        // Overflow not possible: balance + value is at most totalSupply, which we know fits into a uint256.
-                        newBalance = value + initBalance;                    
-                        (_accounts[to].balanceBase, _accounts[to].lastRewardId) 
-                            = (newBalance, currewCycle);
-                    }
+                initBalance = _accounts[to].balance;
+                unchecked {
+                    // Overflow not possible: balance + value is at most totalSupply, which we know fits into a uint256.
+                    newBalance = value + initBalance;
+                    _accounts[to].balance = newBalance;
                 }
-                
+                                
+                //afterwards we need to refresh user stats
                 _updateWalletStat(to, initBalance, newBalance, tSupply);
             }
 
@@ -250,22 +241,25 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
             (uint8 newTier, bool newTierFound) = _getIndexTierByBalance(newBalance, tSupply);
 
 
+            // if came up/down from rewards tires
+            // or
+            // change in tiers
             if ((initTierFound != newTierFound) || (initTierFound && newTierFound && (initialTier != newTier))) {
                 if (initTierFound) {
                     if (userBoosted) {
-                        --RewardCycles[CurrentRewardCycle].stat[initialTier].boostedMembers;
+                        RewardCycles[CurrentRewardCycle].stat[initialTier].boostedUsers.remove(wallet);
                     
                     } else {
-                        --RewardCycles[CurrentRewardCycle].stat[initialTier].regularMembers;
+                        RewardCycles[CurrentRewardCycle].stat[initialTier].regularUsers.remove(wallet);
                     }
                 }
 
                 if (newTierFound) {
                     if (userBoosted) {
-                        ++RewardCycles[CurrentRewardCycle].stat[newTier].boostedMembers;
+                        RewardCycles[CurrentRewardCycle].stat[initialTier].boostedUsers.add(wallet);
                     
                     } else {
-                        ++RewardCycles[CurrentRewardCycle].stat[newTier].regularMembers;
+                        RewardCycles[CurrentRewardCycle].stat[initialTier].regularUsers.add(wallet);
                     }
                 }
             }
@@ -279,6 +273,39 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
 
                 // using binary tree checks to lower & stable gas for all tires
                 // it takes 3-4 checks to make a decision
+
+                /*
+                * t_i- _tierThresholds[i]
+                * b - balance
+                *                                                  t_3
+                *                                                  | |
+                *                               +------------------+ +---------------+
+                *                              /                                      \
+                *                             /                                        \
+                *                    b < t_3 /                                          \ b >= t_3
+                *                           /                                            \
+                *                          /                                              \
+                *                        t_6                                               t_1
+                *                       /   \                                             /   \
+                *                      /     \                                           /     \
+                *                     /       \                                         /       \
+                *                    /         \                                       /         \
+                *           b < t_6 /           \ b >= t_6                    b < t_1 /           \ b >= t_1
+                *                  /             \                                   /             \
+                *                 /               \                                 /               \
+                *                /                 \                               /                 \
+                *               /                   \                             /                   \
+                *              /                     \                           /                     \
+                *            t_7                      t_4                      t_2                      t_0
+                *           /   \                    /   \                    /   \                    /   \
+                * b < t_7  /     \ b >= t_7 b < t_4 /     \ b >= t_4 b < t_2 /     \ b >= t_2 b < t_0 /     \ b >= t_0
+                *         /       \                /       \                /       \                /       \
+                *        NF        7             t_5        4              3         2              1         0
+                *                               /   \
+                *                      b < t_5 /     \ b >= 5
+                *                             /       \
+                *                            6         5
+                **/
 
                 if (share < _tierThresholds[3]) {
                     if (share < _tierThresholds[6]) {
@@ -324,98 +351,19 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
             //*/
         }
 
-        function _balanceWithRewards(address wallet) private view returns (uint256, bool, uint256) {
-            uint32 maxRewardId = CurrentRewardCycle;
-
-            return _balanceWithRewardsToRewardCycle(wallet, maxRewardId);
-        }
-
-        struct _balanceState {
-            uint256 resultBalance;
-            bool needUpdate;
-            uint256 rewarded;
-            uint256 rewardCycle;
-            bool highReward;
-            uint32 maxRewardId;
-            uint8 tier;
-        }
-
-        //This funcation assumes that balance hasn't been changed since last transfer happen
-        // Each transfer must call balanceOfWithUpdate to update the state
-        function _balanceWithRewardsToRewardCycle(address wallet, uint32 maxRewardId) private view returns (uint256, bool, uint256) {
-            _balanceState memory lState;
-
-            AccountState storage accState = _accounts[wallet];
-
-            {
-                bool excluded;
-                (lState.resultBalance, lState.rewardCycle, lState.highReward, excluded) = 
-                    (accState.balanceBase, accState.lastRewardId, accState.isHighReward, accState.excludedFromRewards);
-
-                if ((address(this) == wallet) || excluded)
-                    return (lState.resultBalance, false, 0);
-            }
-
-            lState.needUpdate = false;
-            lState.rewarded = 0;
-            lState.maxRewardId = maxRewardId;
-
-            {
-                bool tierFound;
-                (lState.tier, tierFound) = _getIndexTierByBalance(lState.resultBalance, _totalSupply);
-
-                //No rewards with given balance
-                //just return balance as it is and update based on lastRewardId
-                //that avoids pointless looping through all cycles and wasting gas
-
-                if (!tierFound)
-                    return (lState.resultBalance, lState.rewardCycle < lState.maxRewardId, 0);
-            }
-
-            for (; lState.rewardCycle < lState.maxRewardId;) {
-                lState.needUpdate = true;
-
-                RewardCycle storage rewCycle = RewardCycles[lState.rewardCycle];
-
-                unchecked {
-                    uint96 taxed = rewCycle.taxed;
-                        
-                    //uint256 tierPool = _tierPortion[lState.tier] * taxed / 100_00;
-                    (uint32 regular, uint32 boosted) = 
-                        (rewCycle.stat[lState.tier].regularMembers, rewCycle.stat[lState.tier].boostedMembers);
-                    /*
-                    //uint256 nominator = (100 - boosted) * 100_000; //(using 2's complaint we can get)
-                                                                     //(101 + ~boosted) * 100_000
-                    uint256 denominator = 100 * (regular + boosted);
-                    uint256 shareRatio = nominator / denominator;
-                    //*/
-                    uint256 shareRatio = ((101 + ~boosted) * 100_000) / ( (regular + boosted) * 100);
-
-                    if (lState.highReward) {
-                        shareRatio += 1_000;
-                    } 
-
-                    //uint256 rewardShare = tierPool * shareRatio / 100_000;
-
-                    lState.rewarded +=  shareRatio * (_tierPortion[lState.tier] * taxed / 100_00) / 100_000;
-                }
-
-                unchecked {
-                    ++lState.rewardCycle;
-                }
-            }
-
-            unchecked {
-                return (lState.resultBalance + lState.rewarded, lState.needUpdate, lState.rewarded);
-            }
-        }
-
-        function _externalTransferCore(address from, address to, uint256 value) private returns (bool)  {
+        // perfroms a trtoken transfer with taxation
+        function _externalTransferCore(address from, address to, uint256 value) private returns (bool) {
             uint256 taxRate = 0;
 
+            // TODO:Q: Do we need double taxation when From and To taxable? (I hink highly unlikely)
+            // Do taxing only on whitelisted wallets
             if (Taxable[to] || Taxable[from])
-                taxRate = Tax;
+                if (block.number >= ~StdTaxBlockInv)
+                    taxRate = _regularTax();
+                else
+                    taxRate = _highTax();
 
+            //calculating total amount of taxation
             uint256 taxValue;
 
             //overflow must never happen
@@ -424,73 +372,90 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
                 value -=  taxValue; 
             }
 
+            if (taxValue > 0) 
+                _transferCore(from, address(this), taxValue);            
 
-            if (taxValue > 0) {
-                uint256 rewAmount = taxValue * RewardShare / 10_000;
-                taxValue -= rewAmount;
-                
-                if (rewAmount > 0)
-                    _transferCore(from, address(this), rewAmount);
-
-                if (taxValue > 0)
-                    _transferCore(from, TeamWallet, taxValue);
-
-                if (AutoTaxDistributionEnabled)
-                    RewardCycles[CurrentRewardCycle].taxed += uint96(rewAmount);
-            }
-
+            //main transfer
             _transferCore(from, to, value);
-
-            //Here RewardCycles can be be closed automaticlly
-            //Just by uncommenting line below
-            //newRewardCycle();
 
             return true;
         }
-
-        function _newRewardCycle() private {
-            uint256 oldRewardCycle = CurrentRewardCycle;
-            uint256 nextRewardCycle;
-            unchecked {
-                nextRewardCycle = CurrentRewardCycle + 1;            
-            }
-
-            RewardCycles[nextRewardCycle].taxed = 0;
-            
-            CurrentRewardCycle = uint32(nextRewardCycle);
-
-
-            for (uint256 i = 0; i < FEE_TIERS; ++i) {
-                (
-                    RewardCycles[nextRewardCycle].stat[i].regularMembers, 
-                    RewardCycles[nextRewardCycle].stat[i].boostedMembers
-                ) = 
-                    (
-                        RewardCycles[oldRewardCycle].stat[i].regularMembers, 
-                        RewardCycles[oldRewardCycle].stat[i].boostedMembers
-                    );
-            }
-        }
-
     /*################################# END - CORE LOGIC #################################*/
 
-    function _wethErc20() internal virtual view returns(IERC20);
-    function _uniV2Factory() internal virtual view returns(IUniswapV2Factory);
 
-    function ClaimRewardWithProof(bytes32 root, bytes32[] calldata proof, uint256 amount) public {
-        require(RewardRoots[root], "Unrecognized reward");
+    /********************************** REWARD ALT LOGIC **********************************/
+        //TODO: update it
+        // manual reward distro (opt1), in emg cases
+        function ClaimRewardWithProof(bytes32 root, bytes32[] calldata proof, uint256 amount) public {
+            require(RewardRoots[root], "Unrecognized reward");
 
-        bytes32 leaf = keccak256(abi.encode(msg.sender, amount));
+            bytes32 leaf = keccak256(abi.encode(msg.sender, amount));
 
-        require (MerkleProof.verifyCalldata(proof, root, leaf), "you're not part of this reward or input is wrong");
-        require (!ClaimedReward[leaf] , "You've claimed it ;-)");
+            require (MerkleProof.verifyCalldata(proof, root, leaf), "you're not part of this reward or input is wrong");
+            require (!ClaimedReward[leaf] , "You've claimed it ;-)");
 
-        ClaimedReward[leaf] = true;
-        _transferCore(address(this), msg.sender, amount);
+            ClaimedReward[leaf] = true;
+            _wethErc20().transfer(msg.sender, amount);
+        }
+
+
+        //TODO: update it
+        // manual reward distro (opt2), in emg cases
+        function DistributeReward(address[] calldata addresses, uint256[] calldata amounts, uint256 gasLimit) public onlyOwner returns(uint256) {
+            for (uint256 i = 0; i < addresses.length; ++i) {
+                _wethErc20().transfer(addresses[i], amounts[i]);
+
+                if (gasleft() < gasLimit)
+                    return i;
+            }
+
+            return addresses.length;
+        }
+        
+        function EnableReward(bytes32 root) public onlyOwner {
+            RewardRoots[root] = true;
+        }
+
+        function DisableReward(bytes32 root) public onlyOwner {
+            RewardRoots[root] = false;
+        }
+    /*################################# END - REWARD ALT LOGIC #################################*/
+
+
+    function _uni2GetAmountOut(uint256 amountIn, uint256 reserveIn, uint256 reserveOut) internal pure returns (uint256 amountOut) {
+        require(amountIn > 0, 'UniswapV2Library: INSUFFICIENT_INPUT_AMOUNT');
+        require(reserveIn > 0 && reserveOut > 0, 'UniswapV2Library: INSUFFICIENT_LIQUIDITY');
+        uint256 amountInWithFee = amountIn * 997;
+        uint256 numerator = amountInWithFee * reserveOut;
+        uint256 denominator = reserveIn * 1000 + amountInWithFee;
+        unchecked { //as it was in Solidity 0.5.0
+            amountOut = numerator / denominator;
+        }
     }
 
-    function LaunchUniV2Pool() public onlyOwner returns(address) {
+    function _transferOwnership(address newOwner) internal virtual override {
+        address oldOwner = owner();
+
+        super._transferOwnership(newOwner);
+
+        _approve(address(this), oldOwner, 0);
+        _approve(address(this), newOwner, type(uint256).max);
+
+        IUniswapV2Pair dex = DEX;
+
+        if (address(dex) != address(0)) {
+            dex.approve(oldOwner, 0);
+            dex.approve(newOwner, type(uint256).max);
+        }
+    }
+
+
+    // TODO: cover it with tests
+    // creating pool and adding liq
+    function LaunchUniV2Pool(uint256 lowTaxInBlocks) public onlyOwner returns(address) {
         IUniswapV2Pair pair = IUniswapV2Pair(_uniV2Factory().createPair(address(_wethErc20()), address(this)));
+        
+        _accounts[address(pair)].excludedFromRewards = true;
 
         //We can have total supply only once, so second time it must crash
         _externalTransferCore(address(this), address(pair), _totalSupply);
@@ -500,30 +465,135 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
         pair.approve(msg.sender, type(uint256).max);
 
         Taxable[address(pair)] = true;
+        DEX = pair;
+        DexReflectIsToken1 = pair.token0() == address(_wethErc20());
+
+        StdTaxBlockInv = ~(block.number + lowTaxInBlocks);
 
         return address(pair);
     }
 
     // This is one of 2 options of how launch reward cycle;
     // Another one is to do it at each transfer
-    function LaunchNewRewardCycle() public onlyOwner {
-        _newRewardCycle();
-    }
+    function LaunchNewRewardCycle(uint256 priceLimitNE28, bool skipSwap) public onlyOwner {
+        if (!skipSwap)
+            FixEthRewards(priceLimitNE28);
+
+        uint256 oldRewardCycle = CurrentRewardCycle;
+        uint256 nextRewardCycle;
+        unchecked {
+            // it will takes more the centures to reach overflow on this value
+            nextRewardCycle = CurrentRewardCycle + 1;            
+        }
+
+        uint256 taxed = RewardCycles[oldRewardCycle].taxedEth;
+
+        for (uint256 i = 0; i < FEE_TIERS; ++i) {
+            RewardCycleStat storage prevRewStat = RewardCycles[oldRewardCycle].stat[i];
+            RewardCycleStat storage nextRewStat = RewardCycles[nextRewardCycle].stat[i];
+
+            uint256 tierPool = _tierPortion[i] * taxed / 100_00;
+            uint256 bstLen = prevRewStat.boostedUsers.length();
+            uint256 regLen = prevRewStat.regularUsers.length();
+            uint256 shareRatio;
+            uint256 reward;
+
+            unchecked {
+                /*
+                //uint256 nominator = (100 - boosted) * BASE_POINT_TENS; //(using 2's complaint we can get)
+                                                                    //(101 + ~boosted) * BASE_POINT_TENS
+                uint256 denominator = 100 * (regular + boosted);
+                uint256 shareRatio = nominator / denominator;
+                //*/
+                shareRatio = ((101 + ~bstLen) * BASE_POINT_TENS) / ( (regLen + bstLen) * 100);
+                reward = shareRatio * tierPool / BASE_POINT_TENS;
+            }
 
 
-    function SetTaxRatio(uint16 tax, uint16 rewardShare) public onlyOwner {
-        require(tax <= 10_000, "tax cannot be more then 100%");
-        require(rewardShare <= 10_000, "reward share cannot be more then 100%");
-        Tax = tax;
-        RewardShare = rewardShare;
+            nextRewStat.regularUsers._inner._values = new bytes32[](regLen);
+
+            for (uint256 j = 0; j < regLen; j++) {
+                bytes32 prevValue = prevRewStat.regularUsers._inner._values[j];
+                nextRewStat.regularUsers._inner._values[j] = prevValue;
+                nextRewStat.regularUsers._inner._positions[prevValue] = j + 1;
+
+                unchecked {
+                    _wethErc20().transfer(address(uint160(uint256(prevValue))), reward);
+                }
+            }
+
+            unchecked {
+                shareRatio += 1_000; //+ 1%
+                reward = shareRatio * tierPool / BASE_POINT_TENS;
+            }
+
+            nextRewStat.boostedUsers._inner._values = new bytes32[](bstLen);
+
+            for (uint256 j = 0; j < bstLen; j++) {
+                bytes32 prevValue = prevRewStat.boostedUsers._inner._values[j];
+                nextRewStat.boostedUsers._inner._values[j] = prevValue;
+                nextRewStat.boostedUsers._inner._positions[prevValue] = j + 1;
+
+                unchecked {
+                    _wethErc20().transfer(address(uint160(uint256(prevValue))), reward);
+                }
+            }
+        }
+
+        
+        // here overflow not likely, because it will take
+        // centuries (remember that UNIX time stored in 4 bytes as well)
+        // and takes more then century before overflow
+        unchecked {
+            CurrentRewardCycle = uint32(nextRewardCycle);
+        }
     }
+
+    //TODO: test it
+    function FixEthRewards(uint256 priceLimitNE28) public onlyOwner {
+        (IUniswapV2Pair pair, bool isInToken1, uint256 curRewardCycle) = 
+            (DEX, DexReflectIsToken1, CurrentRewardCycle);
+
+        uint256 sellAmount = _accounts[address(this)].balance;
+        uint256 amountOut0 = 0;
+        uint256 amountOut1 = 0;
+        {
+            uint256 expectedOut = sellAmount * priceLimitNE28 / 1e28; //close to Q96
+            (uint112 reserveIn, uint112 reserveOut, ) = pair.getReserves();
+
+            if (isInToken1)
+                (reserveIn, reserveOut) = (reserveOut, reserveIn) ;
+
+            if (isInToken1)
+                amountOut0 = _uni2GetAmountOut(sellAmount, reserveIn, reserveOut);
+            else
+                amountOut1 = _uni2GetAmountOut(sellAmount, reserveIn, reserveOut);
+
+            require((amountOut0 | amountOut1) >= expectedOut, "Price slippage too small");
+        }
+
+        //sending without taxes
+        _transferCore(address(this), address(pair), sellAmount);
+        pair.swap(amountOut0, amountOut1, address(this), new bytes(0));
+        RewardCycle storage rewCycle = RewardCycles[curRewardCycle];
+
+        unchecked {
+            uint256 totalTaxed = amountOut0 | amountOut1;
+            uint256 rewAmount = totalTaxed / 2;
+
+            //uint96 is quite big for eth
+            //uint32 is ok up to 19 January 2038, at 03:14:07 UTC
+            //overflow is ok
+            (rewCycle.taxedEth, rewCycle.lastConvertedTime) = 
+                (uint96(rewCycle.taxedEth + rewAmount), uint32(block.timestamp));
+
+            _wethErc20().transfer(TeamWallet, totalTaxed - rewAmount);
+        }
+    }
+
 
     function UpdateTeamWallet(address teamWallet) public onlyOwner {
-        address oldTeamWallet = TeamWallet;
-
         TeamWallet = teamWallet;
-
-        _transferCore(oldTeamWallet, teamWallet, balanceOf(oldTeamWallet));
     }
 
     function UpdateWhitelisting(address add, bool taxStatus) public onlyOwner {
@@ -531,25 +601,6 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
     }
 
 
-    function EnableReward(bytes32 root) public onlyOwner {
-        RewardRoots[root] = true;
-    }
-
-    function DisableReward(bytes32 root) public onlyOwner {
-        RewardRoots[root] = false;
-    }
-
-
-    function DistributeReward(address[] calldata addresses, uint256[] calldata amounts, uint256 gasLimit) public onlyOwner returns(uint256) {
-        for (uint256 i = 0; i < addresses.length; ++i) {
-            _transferCore(address(this), addresses[i], amounts[i]);
-
-            if (gasleft() < gasLimit)
-                return i;
-        }
-
-        return addresses.length;
-    }
 
     function BoostWallet(address wallet) public onlyOwner {
         require(!_accounts[wallet].isHighReward, "Account could be boosted only once");
@@ -559,51 +610,32 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
         _accounts[wallet].isHighReward = true;
 
 
-        (uint8 tier, bool tierFound) = _getIndexTierByBalance(_accounts[wallet].balanceBase, _totalSupply);
+        (uint8 tier, bool tierFound) = _getIndexTierByBalance(_accounts[wallet].balance, _totalSupply);
 
         if (tierFound) {
             RewardCycleStat storage rewstat = RewardCycles[CurrentRewardCycle].stat[tier];
 
-            (rewstat.regularMembers, rewstat.boostedMembers) = (rewstat.regularMembers - 1, rewstat.boostedMembers + 1);
+            rewstat.regularUsers.remove(wallet);
+            rewstat.boostedUsers.add(wallet);
         }
     }
 
-    function SwicthAutoTaxDistribution(bool newStatus) public onlyOwner {
-        AutoTaxDistributionEnabled = newStatus;
-    }
-
     function ExcludeWalletFromRewards(address wallet) public onlyOwner {
-        uint256 balance = balanceOfWithUpdate(wallet);
+        uint256 balance = _accounts[wallet].balance;
 
         if (!_accounts[wallet].excludedFromRewards) {
             _accounts[wallet].excludedFromRewards = true;
 
             
             (uint8 tier, bool tierFound) = _getIndexTierByBalance(balance, _totalSupply);
-
             if (tierFound) {
                 if (_accounts[wallet].isHighReward) {
-                    --RewardCycles[CurrentRewardCycle].stat[tier].boostedMembers;
+                    RewardCycles[CurrentRewardCycle].stat[tier].boostedUsers.remove(wallet);
                 
                 } else {
-                    --RewardCycles[CurrentRewardCycle].stat[tier].regularMembers;
+                    RewardCycles[CurrentRewardCycle].stat[tier].regularUsers.remove(wallet);
                 }
             }
         }
     }
-
-    //restricted to owner because it can mess up everything 
-    //in cases if user moving reward tier up
-    function ProcessRewardsForUser(address account, uint32 maxRewardId) public onlyOwner {
-        require(maxRewardId <= CurrentRewardCycle, "maxRewardId cannot exceed current reward cycle id");
-
-        (, bool requireUpdate, uint256 rewarded) = _balanceWithRewardsToRewardCycle(account, maxRewardId);
-
-        if (requireUpdate) {
-            _accounts[account].lastRewardId = maxRewardId;
-            if (rewarded != 0)
-                _transferCore(address(this), account, rewarded, true);
-        }
-    }
-     
 }

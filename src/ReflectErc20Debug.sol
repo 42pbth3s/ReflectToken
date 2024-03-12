@@ -5,12 +5,10 @@ import "./ReflectErc20.sol";
 import "./ReflectDataModel.sol";
 
 contract ReflectDebug is Reflect {
-    constructor (uint16 tax, uint16 rewardShare, address teamWallet, uint256 tSupply) 
-        Reflect(tax, rewardShare, teamWallet, tSupply)
+    constructor (address teamWallet, uint256 tSupply) 
+        Reflect(teamWallet, tSupply)
     {
-
     }
-
 
     
     function TierThresholds() public view returns(uint24[FEE_TIERS] memory) {
@@ -28,11 +26,6 @@ contract ReflectDebug is Reflect {
     function DebugBoostWalletCore(address wallet) public onlyOwner {
         _accounts[wallet].isHighReward = true;
     }
-
-    function GetRewardCycleStat(uint256 rewcycle, uint256 tier) public view returns (RewardCycleStat memory) {
-        return RewardCycles[rewcycle].stat[tier];
-    }
-
     
     function _wethErc20() internal override pure returns(IERC20) {
         return IERC20(address(0));
@@ -40,5 +33,12 @@ contract ReflectDebug is Reflect {
 
     function _uniV2Factory() internal override pure returns(IUniswapV2Factory) {
         return IUniswapV2Factory(address(0));
+    }
+
+    function _regularTax() internal override pure returns(uint256) {
+        return 5_00;
+    }
+    function _highTax() internal override pure returns(uint256) {
+        return 10_00;
     }
 }
