@@ -21,9 +21,5 @@ struct RewardCycleStat {
 struct RewardCycle {
     uint96 taxedEth;
     uint32 lastConvertedTime;
-    /*bool completed;
-    uint8 lastTier;
-    uint24 lastRegularWallet;
-    uint24 lastBoostedWallet;//*/
     RewardCycleStat[FEE_TIERS] stat;
 }

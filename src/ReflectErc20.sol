@@ -61,7 +61,7 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
     //160 bits
     address                             public                  TeamWallet;
 
-    uint256                             public                  StdTaxBlockInv;
+    uint256                             public                  RegularTaxBlockInv;
 
 
     bool                                immutable internal      _initialized;
@@ -358,7 +358,7 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
             // TODO:Q: Do we need double taxation when From and To taxable? (I hink highly unlikely)
             // Do taxing only on whitelisted wallets
             if (Taxable[to] || Taxable[from])
-                if (block.number >= ~StdTaxBlockInv)
+                if (block.number >= ~RegularTaxBlockInv)
                     taxRate = _regularTax();
                 else
                     taxRate = _highTax();
@@ -421,34 +421,84 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
         }
     /*################################# END - REWARD ALT LOGIC #################################*/
 
-
-    function _uni2GetAmountOut(uint256 amountIn, uint256 reserveIn, uint256 reserveOut) internal pure returns (uint256 amountOut) {
-        require(amountIn > 0, 'UniswapV2Library: INSUFFICIENT_INPUT_AMOUNT');
-        require(reserveIn > 0 && reserveOut > 0, 'UniswapV2Library: INSUFFICIENT_LIQUIDITY');
-        uint256 amountInWithFee = amountIn * 997;
-        uint256 numerator = amountInWithFee * reserveOut;
-        uint256 denominator = reserveIn * 1000 + amountInWithFee;
-        unchecked { //as it was in Solidity 0.5.0
-            amountOut = numerator / denominator;
+    /********************************** PRIVATE FUNCS **********************************/
+        function _uni2GetAmountOut(uint256 amountIn, uint256 reserveIn, uint256 reserveOut) internal pure returns (uint256 amountOut) {
+            require(amountIn > 0, 'UniswapV2Library: INSUFFICIENT_INPUT_AMOUNT');
+            require(reserveIn > 0 && reserveOut > 0, 'UniswapV2Library: INSUFFICIENT_LIQUIDITY');
+            uint256 amountInWithFee = amountIn * 997;
+            uint256 numerator = amountInWithFee * reserveOut;
+            uint256 denominator = reserveIn * 1000 + amountInWithFee;
+            unchecked { //as it was in Solidity 0.5.0
+                amountOut = numerator / denominator;
+            }
         }
+
+        function _transferOwnership(address newOwner) internal virtual override {
+            address oldOwner = owner();
+
+            super._transferOwnership(newOwner);
+
+            _approve(address(this), oldOwner, 0);
+            _approve(address(this), newOwner, type(uint256).max);
+
+            IUniswapV2Pair dex = DEX;
+
+            if (address(dex) != address(0)) {
+                dex.approve(oldOwner, 0);
+                dex.approve(newOwner, type(uint256).max);
+            }
+        }
+    /*################################# END - PRIVATE FUNCS #################################*/
+
+
+    function GetRewardCycleTierStat(uint256 rewardCycle, uint256 tier) public view returns(uint256, uint256) {
+        return (
+            RewardCycles[rewardCycle].stat[tier].regularUsers.length(), 
+            RewardCycles[rewardCycle].stat[tier].boostedUsers.length()
+        );
     }
 
-    function _transferOwnership(address newOwner) internal virtual override {
-        address oldOwner = owner();
+    function GetRewardCycleMembersAtTier(uint256 rewardCycle, uint256 tier, bool boosted) public view returns (address[] memory) {
+        uint256 recordsLen;
 
-        super._transferOwnership(newOwner);
+        if (boosted)
+            recordsLen = RewardCycles[rewardCycle].stat[tier].boostedUsers.length();
+        else
+            recordsLen = RewardCycles[rewardCycle].stat[tier].regularUsers.length();
 
-        _approve(address(this), oldOwner, 0);
-        _approve(address(this), newOwner, type(uint256).max);
-
-        IUniswapV2Pair dex = DEX;
-
-        if (address(dex) != address(0)) {
-            dex.approve(oldOwner, 0);
-            dex.approve(newOwner, type(uint256).max);
-        }
+        return GetRewardCycleMembersAtTier(rewardCycle, tier, boosted, recordsLen, 0);
     }
 
+    function GetRewardCycleMembersAtTier(uint256 rewardCycle, uint256 tier, bool boosted, uint256 pageSize, uint256 page) public view returns (address[] memory) {
+        uint256 recordsLen;
+
+        if (boosted)
+            recordsLen = RewardCycles[rewardCycle].stat[tier].boostedUsers.length();
+        else
+            recordsLen = RewardCycles[rewardCycle].stat[tier].regularUsers.length();
+
+        uint256 indexStart = pageSize * page; //inclusive
+        uint256 indexEnd = indexStart + page; //non-inlusive
+        if (indexStart >= recordsLen)
+            return new address[](0);
+        
+        if  (indexEnd > recordsLen)
+            indexEnd = recordsLen;
+
+        address[] memory result = new address[](indexEnd - indexStart);
+
+        for (uint256 i = 0; i < result.length; i++)
+            if (boosted)
+                result[i] = RewardCycles[rewardCycle].stat[tier].boostedUsers.at(i + indexStart);
+            else
+                result[i] = RewardCycles[rewardCycle].stat[tier].regularUsers.at(i + indexStart);
+
+        return result;
+    }
+
+    function RegularTaxBlock() public view returns (uint256) {
+        return ~RegularTaxBlockInv;
+    }
 
     // TODO: cover it with tests
     // creating pool and adding liq
@@ -468,7 +518,7 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
         DEX = pair;
         DexReflectIsToken1 = pair.token0() == address(_wethErc20());
 
-        StdTaxBlockInv = ~(block.number + lowTaxInBlocks);
+        RegularTaxBlockInv = ~(block.number + lowTaxInBlocks);
 
         return address(pair);
     }
