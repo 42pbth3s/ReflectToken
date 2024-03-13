@@ -5,3 +5,10 @@ libs = ["lib"]
 optimizer_runs = 10_000_000
 
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
+[profile.default.rpc_endpoints]
+ethereum = "https://mainnet.infura.io/v3/<API_KEY>"
+goerli = "https://goerli.infura.io/v3/<API_KEY>"
+
+[profile.default.etherscan]
+ethereum = { key = "<API_KEY>", chain=1}
+goerli = { key = "<API_KEY>", chain=5, url ="https://api-goerli.etherscan.io/api"}
