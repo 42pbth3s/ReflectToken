@@ -16,6 +16,7 @@ import {IUniswapV2Factory} from "v2-core/interfaces/IUniswapV2Factory.sol";
 
 import "./ReflectDataModel.sol";
 
+
 abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors {
     using EnumerableSet for EnumerableSet.AddressSet;
 
@@ -52,9 +53,8 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
     uint256                             constant                BASE_POINT = 100_00;
     uint256                             constant                BASE_POINT_TENS = 100_000;
 
-    // 32 + 8 + 160 = 200 bits
-    // 
-    uint32                              public                  CurrentRewardCycle;
+    // 8 + 160 = 168 bits
+    //
     bool                                public                  DexReflectIsToken1;
     IUniswapV2Pair                      public                  DEX;
 
@@ -71,14 +71,14 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
     
     uint256                             public                  Boosted;
 
+    RewardCycle                         public                  RewardCycleData;
+
     mapping(address => AccountState)    internal                _accounts;
-    mapping(uint256 => RewardCycle)     public                  RewardCycles;
 
     mapping (address => bool)           public                  Taxable;
     mapping (bytes32 => bool)           public                  RewardRoots;
     mapping (bytes32 => bool)           public                  ClaimedReward;
     
-    //mapping(address account => uint256) internal                _balances;
     mapping(address account => mapping(address spender => uint256)) internal _allowances;
 
     /********************************** DEPENDENCY INJECTIONS **********************************/
@@ -240,26 +240,25 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
             (uint8 initialTier, bool initTierFound) = _getIndexTierByBalance(initBalance, tSupply);
             (uint8 newTier, bool newTierFound) = _getIndexTierByBalance(newBalance, tSupply);
 
-
             // if came up/down from rewards tires
             // or
             // change in tiers
             if ((initTierFound != newTierFound) || (initTierFound && newTierFound && (initialTier != newTier))) {
                 if (initTierFound) {
                     if (userBoosted) {
-                        RewardCycles[CurrentRewardCycle].stat[initialTier].boostedUsers.remove(wallet);
+                        RewardCycleData.stat[initialTier].boostedUsers.remove(wallet);
                     
                     } else {
-                        RewardCycles[CurrentRewardCycle].stat[initialTier].regularUsers.remove(wallet);
+                        RewardCycleData.stat[initialTier].regularUsers.remove(wallet);
                     }
                 }
 
                 if (newTierFound) {
                     if (userBoosted) {
-                        RewardCycles[CurrentRewardCycle].stat[newTier].boostedUsers.add(wallet);
+                        RewardCycleData.stat[newTier].boostedUsers.add(wallet);
                     
                     } else {
-                        RewardCycles[CurrentRewardCycle].stat[newTier].regularUsers.add(wallet);
+                        RewardCycleData.stat[newTier].regularUsers.add(wallet);
                     }
                 }
             }
@@ -453,31 +452,31 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
     /*################################# END - PRIVATE FUNCS #################################*/
 
 
-    function GetRewardCycleTierStat(uint256 rewardCycle, uint256 tier) public view returns(uint256, uint256) {
+    function GetRewardCycleTierStat(uint256 tier) public view returns(uint256, uint256) {
         return (
-            RewardCycles[rewardCycle].stat[tier].regularUsers.length(), 
-            RewardCycles[rewardCycle].stat[tier].boostedUsers.length()
+            RewardCycleData.stat[tier].regularUsers.length(), 
+            RewardCycleData.stat[tier].boostedUsers.length()
         );
     }
 
-    function GetRewardCycleMembersAtTier(uint256 rewardCycle, uint256 tier, bool boosted) public view returns (address[] memory) {
+    function GetRewardCycleMembersAtTier(uint256 tier, bool boosted) public view returns (address[] memory) {
         uint256 recordsLen;
 
         if (boosted)
-            recordsLen = RewardCycles[rewardCycle].stat[tier].boostedUsers.length();
+            recordsLen = RewardCycleData.stat[tier].boostedUsers.length();
         else
-            recordsLen = RewardCycles[rewardCycle].stat[tier].regularUsers.length();
+            recordsLen = RewardCycleData.stat[tier].regularUsers.length();
 
-        return GetRewardCycleMembersAtTier(rewardCycle, tier, boosted, recordsLen, 0);
+        return GetRewardCycleMembersAtTier(tier, boosted, recordsLen, 0);
     }
 
-    function GetRewardCycleMembersAtTier(uint256 rewardCycle, uint256 tier, bool boosted, uint256 pageSize, uint256 page) public view returns (address[] memory) {
+    function GetRewardCycleMembersAtTier(uint256 tier, bool boosted, uint256 pageSize, uint256 page) public view returns (address[] memory) {
         uint256 recordsLen;
 
         if (boosted)
-            recordsLen = RewardCycles[rewardCycle].stat[tier].boostedUsers.length();
+            recordsLen = RewardCycleData.stat[tier].boostedUsers.length();
         else
-            recordsLen = RewardCycles[rewardCycle].stat[tier].regularUsers.length();
+            recordsLen = RewardCycleData.stat[tier].regularUsers.length();
 
         uint256 indexStart = pageSize * page; //inclusive
         uint256 indexEnd = indexStart + page; //non-inlusive
@@ -491,19 +490,19 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
 
         for (uint256 i = 0; i < result.length; i++)
             if (boosted)
-                result[i] = RewardCycles[rewardCycle].stat[tier].boostedUsers.at(i + indexStart);
+                result[i] = RewardCycleData.stat[tier].boostedUsers.at(i + indexStart);
             else
-                result[i] = RewardCycles[rewardCycle].stat[tier].regularUsers.at(i + indexStart);
+                result[i] = RewardCycleData.stat[tier].regularUsers.at(i + indexStart);
 
         return result;
     }
 
-    function GetWalletRewardTierAtRewardCycle(uint256 rewardCycle, address wallet) public view returns (uint256, bool, bool) {
+    function GetWalletRewardTier(address wallet) public view returns (uint256, bool, bool) {
         for (uint256 tire = 0; tire < FEE_TIERS; tire++) {
-            if (RewardCycles[rewardCycle].stat[tire].regularUsers.contains(wallet))
+            if (RewardCycleData.stat[tire].regularUsers.contains(wallet))
                 return (tire, false, true);
                 
-            if (RewardCycles[rewardCycle].stat[tire].boostedUsers.contains(wallet))
+            if (RewardCycleData.stat[tire].boostedUsers.contains(wallet))
                 return (tire, true, true);
         }
 
@@ -543,22 +542,15 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
         if (!skipSwap)
             FixEthRewards(priceLimitNE28);
 
-        uint256 oldRewardCycle = CurrentRewardCycle;
-        uint256 nextRewardCycle;
-        unchecked {
-            // it will takes more the centures to reach overflow on this value
-            nextRewardCycle = CurrentRewardCycle + 1;            
-        }
-
-        uint256 taxed = RewardCycles[oldRewardCycle].taxedEth;
+        uint256 taxed = RewardCycleData.taxedEth;
+        RewardCycleData.taxedEth = 0;
 
         for (uint256 i = 0; i < FEE_TIERS; ++i) {
-            RewardCycleStat storage prevRewStat = RewardCycles[oldRewardCycle].stat[i];
-            RewardCycleStat storage nextRewStat = RewardCycles[nextRewardCycle].stat[i];
+            RewardCycleStat storage rewStat = RewardCycleData.stat[i];
 
             uint256 tierPool = _tierPortion[i] * taxed / 100_00;
-            uint256 bstLen = prevRewStat.boostedUsers.length();
-            uint256 regLen = prevRewStat.regularUsers.length();
+            uint256 bstLen = rewStat.boostedUsers.length();
+            uint256 regLen = rewStat.regularUsers.length();
             uint256 shareRatio;
             uint256 reward;
 
@@ -574,15 +566,12 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
             }
 
 
-            nextRewStat.regularUsers._inner._values = new bytes32[](regLen);
 
             for (uint256 j = 0; j < regLen; j++) {
-                bytes32 prevValue = prevRewStat.regularUsers._inner._values[j];
-                nextRewStat.regularUsers._inner._values[j] = prevValue;
-                nextRewStat.regularUsers._inner._positions[prevValue] = j + 1;
+                address rewardWallet = rewStat.regularUsers.at(j);
 
                 unchecked {
-                    _wethErc20().transfer(address(uint160(uint256(prevValue))), reward);
+                    _wethErc20().transfer(rewardWallet, reward);
                 }
             }
 
@@ -591,32 +580,21 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
                 reward = shareRatio * tierPool / BASE_POINT_TENS;
             }
 
-            nextRewStat.boostedUsers._inner._values = new bytes32[](bstLen);
 
             for (uint256 j = 0; j < bstLen; j++) {
-                bytes32 prevValue = prevRewStat.boostedUsers._inner._values[j];
-                nextRewStat.boostedUsers._inner._values[j] = prevValue;
-                nextRewStat.boostedUsers._inner._positions[prevValue] = j + 1;
+                address rewardWallet = rewStat.boostedUsers.at(j);
 
                 unchecked {
-                    _wethErc20().transfer(address(uint160(uint256(prevValue))), reward);
+                    _wethErc20().transfer(rewardWallet, reward);
                 }
             }
-        }
-
-        
-        // here overflow not likely, because it will take
-        // centuries (remember that UNIX time stored in 4 bytes as well)
-        // and takes more then century before overflow
-        unchecked {
-            CurrentRewardCycle = uint32(nextRewardCycle);
         }
     }
 
     //TODO: test it
     function FixEthRewards(uint256 priceLimitNE28) public onlyOwner {
-        (IUniswapV2Pair pair, bool isInToken1, uint256 curRewardCycle) = 
-            (DEX, DexReflectIsToken1, CurrentRewardCycle);
+        (IUniswapV2Pair pair, bool isInToken1) = 
+            (DEX, DexReflectIsToken1);
 
         uint256 sellAmount = _accounts[address(this)].balance;
         uint256 amountOut0 = 0;
@@ -639,7 +617,6 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
         //sending without taxes
         _transferCore(address(this), address(pair), sellAmount);
         pair.swap(amountOut0, amountOut1, address(this), new bytes(0));
-        RewardCycle storage rewCycle = RewardCycles[curRewardCycle];
 
         unchecked {
             uint256 totalTaxed = amountOut0 | amountOut1;
@@ -648,8 +625,8 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
             //uint96 is quite big for eth
             //uint32 is ok up to 19 January 2038, at 03:14:07 UTC
             //overflow is ok
-            (rewCycle.taxedEth, rewCycle.lastConvertedTime) = 
-                (uint96(rewCycle.taxedEth + rewAmount), uint32(block.timestamp));
+            (RewardCycleData.taxedEth, RewardCycleData.lastConvertedTime) = 
+                (uint96(RewardCycleData.taxedEth + rewAmount), uint32(block.timestamp));
 
             _wethErc20().transfer(TeamWallet, totalTaxed - rewAmount);
         }
@@ -677,7 +654,7 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
         (uint8 tier, bool tierFound) = _getIndexTierByBalance(_accounts[wallet].balance, _totalSupply);
 
         if (tierFound) {
-            RewardCycleStat storage rewstat = RewardCycles[CurrentRewardCycle].stat[tier];
+            RewardCycleStat storage rewstat = RewardCycleData.stat[tier];
 
             rewstat.regularUsers.remove(wallet);
             rewstat.boostedUsers.add(wallet);
@@ -694,10 +671,10 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
             (uint8 tier, bool tierFound) = _getIndexTierByBalance(balance, _totalSupply);
             if (tierFound) {
                 if (_accounts[wallet].isHighReward) {
-                    RewardCycles[CurrentRewardCycle].stat[tier].boostedUsers.remove(wallet);
+                    RewardCycleData.stat[tier].boostedUsers.remove(wallet);
                 
                 } else {
-                    RewardCycles[CurrentRewardCycle].stat[tier].regularUsers.remove(wallet);
+                    RewardCycleData.stat[tier].regularUsers.remove(wallet);
                 }
             }
         }
