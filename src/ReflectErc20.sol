@@ -15,6 +15,7 @@ import {IUniswapV2Pair} from "v2-core/interfaces/IUniswapV2Pair.sol";
 import {IUniswapV2Factory} from "v2-core/interfaces/IUniswapV2Factory.sol";
 
 import "./ReflectDataModel.sol";
+import {RewardHolderProxy} from "./RewardHolderProxy.sol";
 
 
 abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors {
@@ -46,6 +47,8 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
         _mint(address(this), tSupply);
         _approve(address(this), msg.sender, type(uint256).max);
 
+        RewardHolderProxyAddress = new RewardHolderProxy();
+
         _initialized = true;
     }
 
@@ -66,6 +69,7 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
 
     bool                                immutable internal      _initialized;
     uint256                             immutable private       _totalSupply;
+    RewardHolderProxy                   immutable public        RewardHolderProxyAddress;
     uint24[FEE_TIERS]                   internal                _tierThresholds;
     uint16[FEE_TIERS]                   internal                _tierPortion;
     
@@ -513,7 +517,6 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
         return ~RegularTaxBlockInv;
     }
 
-    // TODO: cover it with tests
     // creating pool and adding liq
     function LaunchUniV2Pool(uint256 lowTaxInBlocks) public onlyOwner returns(address) {
         IUniswapV2Pair pair = IUniswapV2Pair(_uniV2Factory().createPair(address(_wethErc20()), address(this)));
@@ -536,8 +539,7 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
         return address(pair);
     }
 
-    // This is one of 2 options of how launch reward cycle;
-    // Another one is to do it at each transfer
+    // TODO: test it
     function LaunchNewRewardCycle(uint256 priceLimitNE28, bool skipSwap) public onlyOwner {
         if (!skipSwap)
             FixEthRewards(priceLimitNE28);
@@ -553,6 +555,9 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
             uint256 regLen = rewStat.regularUsers.length();
             uint256 shareRatio;
             uint256 reward;
+
+            if (regLen + bstLen == 0)
+                continue;
 
             unchecked {
                 /*
@@ -591,7 +596,6 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
         }
     }
 
-    //TODO: test it
     function FixEthRewards(uint256 priceLimitNE28) public onlyOwner {
         (IUniswapV2Pair pair, bool isInToken1) = 
             (DEX, DexReflectIsToken1);
@@ -599,6 +603,9 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
         uint256 sellAmount = _accounts[address(this)].balance;
         uint256 amountOut0 = 0;
         uint256 amountOut1 = 0;
+
+        require (sellAmount > 0, "Empty balance");
+
         {
             uint256 expectedOut = sellAmount * priceLimitNE28 / 1e28; //close to Q96
             (uint112 reserveIn, uint112 reserveOut, ) = pair.getReserves();
@@ -614,13 +621,17 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
             require((amountOut0 | amountOut1) >= expectedOut, "Price slippage too small");
         }
 
+        RewardHolderProxy holder = RewardHolderProxyAddress;
+
         //sending without taxes
         _transferCore(address(this), address(pair), sellAmount);
-        pair.swap(amountOut0, amountOut1, address(this), new bytes(0));
+        pair.swap(amountOut0, amountOut1, address(holder), new bytes(0));
 
         unchecked {
             uint256 totalTaxed = amountOut0 | amountOut1;
             uint256 rewAmount = totalTaxed / 2;
+
+            holder.SendTokenBack(_wethErc20(), totalTaxed);
 
             //uint96 is quite big for eth
             //uint32 is ok up to 19 January 2038, at 03:14:07 UTC
