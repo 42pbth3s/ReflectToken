@@ -1016,7 +1016,7 @@ contract ERC20Logic is Test {
 
         console.log("LaunchNewRewardCycle");
         vm.expectRevert(revertExptMsg);
-        TokenContract.LaunchNewRewardCycle(0, false);
+        TokenContract.LaunchNewRewardCycle(0, false, 0);
 
         
         console.log("FixEthRewards");

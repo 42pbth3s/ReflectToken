@@ -358,7 +358,6 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
         function _externalTransferCore(address from, address to, uint256 value) private returns (bool) {
             uint256 taxRate = 0;
 
-            // TODO:Q: Do we need double taxation when From and To taxable? (I hink highly unlikely)
             // Do taxing only on whitelisted wallets
             if (Taxable[to] || Taxable[from])
                 if (block.number >= ~RegularTaxBlockInv)
@@ -370,8 +369,9 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
             uint256 taxValue;
 
             //overflow must never happen
+            //taxRate <= BASE_POINT
             unchecked {
-                taxValue = value * taxRate / 10_000;
+                taxValue = value * taxRate / BASE_POINT;
                 value -=  taxValue; 
             }
 
@@ -387,7 +387,6 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
 
 
     /********************************** REWARD ALT LOGIC **********************************/
-        //TODO: test it
         // manual reward distro (opt1), in emg cases
         function ClaimRewardWithProof(bytes32 root, bytes32[] calldata proof, uint256 amount) public {
             require(RewardRoots[root], "Unrecognized reward");
@@ -401,8 +400,6 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
             _wethErc20().transfer(msg.sender, amount);
         }
 
-
-        //TODO: test it
         // manual reward distro (opt2), in emg cases
         function DistributeReward(address[] calldata addresses, uint256[] calldata amounts, uint256 gasLimit) public onlyOwner returns(uint256) {
             for (uint256 i = 0; i < addresses.length; ++i) {
@@ -539,18 +536,19 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
         return address(pair);
     }
 
-    // TODO: test it
-    function LaunchNewRewardCycle(uint256 priceLimitNE28, bool skipSwap) public onlyOwner {
+    function LaunchNewRewardCycle(uint256 priceLimitNE28, bool skipSwap, uint256 rewardDistroShare) public onlyOwner {
         if (!skipSwap)
             FixEthRewards(priceLimitNE28);
 
-        uint256 taxed = RewardCycleData.taxedEth;
+        require(rewardDistroShare <= BASE_POINT, "rewardDistroShare cannot exceed 100%");
+
+        uint256 taxed = RewardCycleData.taxedEth * rewardDistroShare / BASE_POINT;
         RewardCycleData.taxedEth = 0;
 
         for (uint256 i = 0; i < FEE_TIERS; ++i) {
             RewardCycleStat storage rewStat = RewardCycleData.stat[i];
 
-            uint256 tierPool = _tierPortion[i] * taxed / 100_00;
+            uint256 tierPool = _tierPortion[i] * taxed / BASE_POINT;
             uint256 bstLen = rewStat.boostedUsers.length();
             uint256 regLen = rewStat.regularUsers.length();
             uint256 shareRatio;

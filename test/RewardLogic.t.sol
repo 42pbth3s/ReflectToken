@@ -320,7 +320,7 @@ contract RewardLogic is Test {
         console.log("Distributing rewards");
 
         vm.startPrank(Owner);
-        TokenContract.LaunchNewRewardCycle(0, true);
+        TokenContract.LaunchNewRewardCycle(0, true, 100_00);
         vm.stopPrank();
 
         console.log("Reward balances");
@@ -391,7 +391,7 @@ contract RewardLogic is Test {
         console.log("Distributing rewards");
 
         vm.startPrank(Owner);
-        TokenContract.LaunchNewRewardCycle(0, true);
+        TokenContract.LaunchNewRewardCycle(0, true, 100_00);
         vm.stopPrank();
 
         console.log("Reward balances");
