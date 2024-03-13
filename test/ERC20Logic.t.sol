@@ -9,7 +9,7 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 bytes16 constant HEX_DIGITS = "0123456789abcdef";
 
-contract CounterTest is Test {
+contract ERC20Logic is Test {
         
     ReflectDebug                            public              TokenContract;
 
