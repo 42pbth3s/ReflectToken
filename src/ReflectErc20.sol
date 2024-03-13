@@ -256,10 +256,10 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
 
                 if (newTierFound) {
                     if (userBoosted) {
-                        RewardCycles[CurrentRewardCycle].stat[initialTier].boostedUsers.add(wallet);
+                        RewardCycles[CurrentRewardCycle].stat[newTier].boostedUsers.add(wallet);
                     
                     } else {
-                        RewardCycles[CurrentRewardCycle].stat[initialTier].regularUsers.add(wallet);
+                        RewardCycles[CurrentRewardCycle].stat[newTier].regularUsers.add(wallet);
                     }
                 }
             }
