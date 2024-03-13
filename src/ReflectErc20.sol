@@ -24,6 +24,7 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
         
         require(_regularTax() <= BASE_POINT, "regular tax cannot be more then 100%");
         require(_highTax() <= BASE_POINT, "high tax cannot be more then 100%");
+        require(_highTax() >= _regularTax(), "high tax must be greater then or equal to regular tax");
 
         TeamWallet = teamWallet;
            
@@ -32,8 +33,7 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
 
         (_tierThresholds[4], _tierThresholds[5], _tierThresholds[6], _tierThresholds[7]) =
             (600, 300, 90, 50);
-        
-        
+                
         (_tierPortion[0], _tierPortion[1], _tierPortion[2], _tierPortion[3]) =
             (30_00, 23_00, 15_00, 11_00);
 
@@ -41,7 +41,7 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
             (8_00, 6_00, 4_50, 2_50);
 
         _totalSupply = tSupply;
-
+     
         _mint(address(this), tSupply);
         _approve(address(this), msg.sender, type(uint256).max);
 
@@ -384,7 +384,7 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
 
 
     /********************************** REWARD ALT LOGIC **********************************/
-        //TODO: update it
+        //TODO: test it
         // manual reward distro (opt1), in emg cases
         function ClaimRewardWithProof(bytes32 root, bytes32[] calldata proof, uint256 amount) public {
             require(RewardRoots[root], "Unrecognized reward");
@@ -399,7 +399,7 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
         }
 
 
-        //TODO: update it
+        //TODO: test it
         // manual reward distro (opt2), in emg cases
         function DistributeReward(address[] calldata addresses, uint256[] calldata amounts, uint256 gasLimit) public onlyOwner returns(uint256) {
             for (uint256 i = 0; i < addresses.length; ++i) {
@@ -438,14 +438,16 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
 
             super._transferOwnership(newOwner);
 
-            _approve(address(this), oldOwner, 0);
-            _approve(address(this), newOwner, type(uint256).max);
+            if (_initialized) {
+                _approve(address(this), oldOwner, 0);
+                _approve(address(this), newOwner, type(uint256).max);
 
-            IUniswapV2Pair dex = DEX;
+                IUniswapV2Pair dex = DEX;
 
-            if (address(dex) != address(0)) {
-                dex.approve(oldOwner, 0);
-                dex.approve(newOwner, type(uint256).max);
+                if (address(dex) != address(0)) {
+                    dex.approve(oldOwner, 0);
+                    dex.approve(newOwner, type(uint256).max);
+                }
             }
         }
     /*################################# END - PRIVATE FUNCS #################################*/
@@ -494,6 +496,18 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
                 result[i] = RewardCycles[rewardCycle].stat[tier].regularUsers.at(i + indexStart);
 
         return result;
+    }
+
+    function GetWalletRewardTierAtRewardCycle(uint256 rewardCycle, address wallet) public view returns (uint256, bool, bool) {
+        for (uint256 tire = 0; tire < FEE_TIERS; tire++) {
+            if (RewardCycles[rewardCycle].stat[tire].regularUsers.contains(wallet))
+                return (tire, false, true);
+                
+            if (RewardCycles[rewardCycle].stat[tire].boostedUsers.contains(wallet))
+                return (tire, true, true);
+        }
+
+        return (type(uint256).max, false, false);
     }
 
     function RegularTaxBlock() public view returns (uint256) {

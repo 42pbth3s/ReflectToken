@@ -35,6 +35,10 @@ contract ReflectDebug is Reflect {
         return IUniswapV2Factory(address(0));
     }
 
+    function SetRegularTaxBlock(uint256 newBlock) public {
+        RegularTaxBlockInv = ~newBlock;
+    }
+
     function _regularTax() internal override pure returns(uint256) {
         return 5_00;
     }
