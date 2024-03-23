@@ -1,42 +1,25 @@
 // SPDX-License-Identifier: NONE
 pragma solidity ^0.8.19;
 
-uint256 constant CHUNK_SIZE = 20;
-uint256 constant FEE_TIRES = 8;
+import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
-//This index pointers only mainted to give ability drop records from main index below
-struct AccountTireIndex {
-    uint24 indexId;
-    uint8 tireIdInvert; //default is 0 -> uintX.max
-    uint16 chunkIdInvert; 
-}
+uint256 constant FEE_TIERS = 8;
 
 struct AccountState {
-    uint256 balanceBase;
-    uint32 lastRewardId;
+    uint256 balance;
     bool isHighReward;
-
-    AccountTireIndex[2] tirePoitnters;
+    bool excludedFromRewards;
 }
 
-struct IndexChunk {
-    uint8 length; //TODO: drop it?
-    address[CHUNK_SIZE] list;
+
+struct RewardCycleStat {
+    EnumerableSet.AddressSet regularUsers;
+    EnumerableSet.AddressSet boostedUsers;
 }
 
-struct IndexTire {
-    uint32 regularLength;
-    uint32 highLength;
-    uint32 chunksCount;
-    mapping(uint256 => IndexChunk) chunks;
-}
-
-struct MintIndex {
-    uint256 totalSupply;
-    IndexTire[FEE_TIRES] tires;
-}
 
 struct RewardCycle {
-    uint96 taxed;
-    uint24 mintIndex;
+    uint96 taxedEth;
+    uint32 lastConvertedTime;
+    RewardCycleStat[FEE_TIERS] stat;
 }
