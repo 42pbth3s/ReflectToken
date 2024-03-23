@@ -132,13 +132,13 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
 
             
             function transfer(address to, uint256 value) public override returns (bool) {
-                return _externalTransferCore(msg.sender, to, value);
+                return _taxableTransferCore(msg.sender, to, value);
             }
 
             function transferFrom(address from, address to, uint256 value) public override returns (bool)  {
                 _spendAllowance(from, msg.sender, value);
 
-                return _externalTransferCore(from, to, value);
+                return _taxableTransferCore(from, to, value);
             }
 
 
@@ -355,7 +355,7 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
         }
 
         // perfroms a trtoken transfer with taxation
-        function _externalTransferCore(address from, address to, uint256 value) private returns (bool) {
+        function _taxableTransferCore(address from, address to, uint256 value) private returns (bool) {
             uint256 taxRate = 0;
 
             // Do taxing only on whitelisted wallets
@@ -521,7 +521,7 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
         _accounts[address(pair)].excludedFromRewards = true;
 
         //We can have total supply only once, so second time it must crash
-        _externalTransferCore(address(this), address(pair), _totalSupply);
+        _taxableTransferCore(address(this), address(pair), _totalSupply);
         _wethErc20().transfer(address(pair), _wethErc20().balanceOf(address(this)));
 
         pair.mint(address(this));
