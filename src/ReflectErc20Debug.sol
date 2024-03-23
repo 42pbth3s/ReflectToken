@@ -5,8 +5,8 @@ import "./ReflectErc20.sol";
 import "./ReflectDataModel.sol";
 
 contract ReflectDebug is Reflect {
-    constructor (address teamWallet, uint256 tSupply) 
-        Reflect(teamWallet, tSupply)
+    constructor (address teamWallet, uint256 tSupply, uint256 airdropSupply) 
+        Reflect(teamWallet, tSupply, airdropSupply)
     {
     }
 

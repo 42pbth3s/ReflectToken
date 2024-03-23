@@ -21,12 +21,13 @@ import {RewardHolderProxy} from "./RewardHolderProxy.sol";
 abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors {
     using EnumerableSet for EnumerableSet.AddressSet;
 
-    constructor (address teamWallet, uint256 tSupply)
+    constructor (address teamWallet, uint256 tSupply, uint256 airdropSupply)
         Ownable(msg.sender)  {
         
         require(_regularTax() <= BASE_POINT, "regular tax cannot be more then 100%");
         require(_highTax() <= BASE_POINT, "high tax cannot be more then 100%");
         require(_highTax() >= _regularTax(), "high tax must be greater then or equal to regular tax");
+        require(airdropSupply <= tSupply, "Airdrop supply shall be less or equal to total supply");
 
         TeamWallet = teamWallet;
            
@@ -43,8 +44,8 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
             (8_00, 6_00, 4_50, 2_50);
 
         _totalSupply = tSupply;
+        AirdropSupply = airdropSupply;
      
-        _mint(address(this), tSupply);
         _approve(address(this), msg.sender, type(uint256).max);
 
         RewardHolderProxyAddress = new RewardHolderProxy();
@@ -69,6 +70,9 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
 
     bool                                immutable internal      _initialized;
     uint256                             immutable private       _totalSupply;
+    uint256                             immutable public        AirdropSupply;
+    uint256                             public                  Airdropped;
+    bytes32                             public                  AirdropRoot;
     RewardHolderProxy                   immutable public        RewardHolderProxyAddress;
     uint24[FEE_TIERS]                   internal                _tierThresholds;
     uint16[FEE_TIERS]                   internal                _tierPortion;
@@ -82,6 +86,7 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
     mapping (address => bool)           public                  Taxable;
     mapping (bytes32 => bool)           public                  RewardRoots;
     mapping (bytes32 => bool)           public                  ClaimedReward;
+    mapping (bytes32 => bool)           public                  ClaimedAirdrop;
     
     mapping(address account => mapping(address spender => uint256)) internal _allowances;
 
@@ -195,9 +200,7 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
             //cache for gas saving
             uint256 tSupply = _totalSupply;
 
-            if (from == address(0)) {
-                require(!_initialized, "Can only mint at the creation time");
-            } else {
+            if (from != address(0)) {
                 uint256 fromBalance = _accounts[from].balance;
 
                 if (fromBalance < value) {
@@ -421,6 +424,31 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
         }
     /*################################# END - REWARD ALT LOGIC #################################*/
 
+
+
+    /********************************** AIRDROP LOGIC **********************************/
+        function Airdrop(bytes32 root, bytes32[] calldata proof, uint256 amount) public {
+            uint256 airdropped = Airdropped + amount;
+ 
+            require(AirdropRoot == root, "Unrecognized airdrop");
+            require(airdropped <= AirdropSupply, "Supply overflow" );
+            require(amount > 0, "Amount must be non 0");
+
+            bytes32 leaf = keccak256(abi.encode(msg.sender, amount));
+
+            require(MerkleProof.verifyCalldata(proof, root, leaf), "You're not part of this airdrop or input is wrong");
+            require(!ClaimedAirdrop[leaf], "Already claimed");
+
+            Airdropped = airdropped;
+            ClaimedAirdrop[leaf] = true;
+            _mint(msg.sender, amount);
+        }
+
+        function SetAirdropRoot(bytes32 root) public onlyOwner {
+            AirdropRoot = root;
+        }
+    /*################################# END - AIRDROP  LOGIC #################################*/
+
     /********************************** PRIVATE FUNCS **********************************/
         function _uni2GetAmountOut(uint256 amountIn, uint256 reserveIn, uint256 reserveOut) internal pure returns (uint256 amountOut) {
             require(amountIn > 0, 'UniswapV2Library: INSUFFICIENT_INPUT_AMOUNT');
@@ -516,12 +544,15 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
 
     // creating pool and adding liq
     function LaunchUniV2Pool(uint256 lowTaxInBlocks) public onlyOwner returns(address) {
+        require(address(DEX) == address(0), "DEX already initialised");
+        require(AirdropSupply < _totalSupply, "0 supply for the pool");
+
         IUniswapV2Pair pair = IUniswapV2Pair(_uniV2Factory().createPair(address(_wethErc20()), address(this)));
         
         _accounts[address(pair)].excludedFromRewards = true;
 
         //We can have total supply only once, so second time it must crash
-        _taxableTransferCore(address(this), address(pair), _totalSupply);
+        _mint(address(pair), _totalSupply - AirdropSupply);
         _wethErc20().transfer(address(pair), _wethErc20().balanceOf(address(this)));
 
         pair.mint(address(this));

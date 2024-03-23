@@ -29,7 +29,7 @@ contract RewardLogic is Test {
         vm.createSelectFork("ethereum");
 
         vm.startPrank(Owner);
-        TokenContract = new ReflectErc20OnMainnet(TeamWallet, 10_000_000_000 ether);
+        TokenContract = new ReflectErc20OnMainnet(TeamWallet, 10_000_000_000 ether, 0);
         vm.stopPrank();
 
         RewardWallet = address(TokenContract);

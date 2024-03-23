@@ -22,7 +22,7 @@ contract ERC20Logic is Test {
 
     function setUp() public {
         vm.startPrank(Owner);
-        TokenContract = new ReflectDebug(TeamWallet, 10_000_000_000 ether);
+        TokenContract = new ReflectDebug(TeamWallet, 10_000_000_000 ether, 0);
         vm.stopPrank();
 
         RewardWallet = address(TokenContract);
@@ -31,7 +31,7 @@ contract ERC20Logic is Test {
         
         vm.startPrank(Owner);
         TokenContract.ExcludeWalletFromRewards(FundWallet);
-        TokenContract.transferFrom(address(TokenContract), FundWallet, 10_000_000_000 ether);
+        deal(address(TokenContract), FundWallet, TokenContract.totalSupply());
         vm.stopPrank();
     }
 
