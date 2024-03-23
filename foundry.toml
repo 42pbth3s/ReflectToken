@@ -8,6 +8,7 @@ optimizer_runs = 10_000_000
 [profile.default.rpc_endpoints]
 ethereum = "https://mainnet.infura.io/v3/<API_KEY>"
 goerli = "https://goerli.infura.io/v3/<API_KEY>"
+base = "https://mainnet.base.org"
 
 [profile.default.etherscan]
 ethereum = { key = "<API_KEY>", chain=1}
