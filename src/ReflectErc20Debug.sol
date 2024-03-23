@@ -28,11 +28,11 @@ contract ReflectDebug is Reflect {
     }
     
     function _wethErc20() internal override pure returns(IERC20) {
-        return IERC20(address(0));
+        return IERC20(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
     }
 
     function _uniV2Factory() internal override pure returns(IUniswapV2Factory) {
-        return IUniswapV2Factory(address(0));
+        return IUniswapV2Factory(0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f);
     }
 
     function SetRegularTaxBlock(uint256 newBlock) public {
@@ -44,5 +44,13 @@ contract ReflectDebug is Reflect {
     }
     function _highTax() internal override pure returns(uint256) {
         return 10_00;
+    }
+
+    //For hardhat gas testing
+    function SupplyIndexedTokens(address wallet, uint256 amount) public {
+        uint256 oldBalance = _accounts[wallet].balance;
+        _accounts[wallet].balance += amount;
+
+        _updateWalletStat(wallet, oldBalance, _accounts[wallet].balance , totalSupply());
     }
 }

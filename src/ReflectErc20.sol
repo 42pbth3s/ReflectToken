@@ -235,7 +235,7 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
             emit Transfer(from, to, value);
         }
 
-        function _updateWalletStat(address wallet, uint256 initBalance, uint256 newBalance, uint256 tSupply) private {
+        function _updateWalletStat(address wallet, uint256 initBalance, uint256 newBalance, uint256 tSupply) internal {
             (bool userBoosted, bool userExcluded) = (_accounts[wallet].isHighReward, _accounts[wallet].excludedFromRewards);
 
             if ((wallet == address(this)) || userExcluded)
@@ -582,6 +582,9 @@ abstract contract Reflect is Ownable2Step, IERC20, IERC20Metadata, IERC20Errors 
                 shareRatio += 1_000; //+ 1%
                 reward = shareRatio * tierPool / BASE_POINT_TENS;
             }
+
+            if (reward == 0)
+                continue;
 
 
             for (uint256 j = 0; j < bstLen; j++) {
